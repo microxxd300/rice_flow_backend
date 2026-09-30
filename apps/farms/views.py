@@ -4,8 +4,24 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from .location_check import check_pin
 from .models import Farm
 from .serializers import FarmSerializer, AdminFarmSerializer
+
+
+class FarmLocationCheckView(APIView):
+    """GET /api/farms/check-location/?lat=7.30&lon=125.68 — is this pin on farmland?"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            lat = float(request.query_params['lat'])
+            lon = float(request.query_params['lon'])
+        except (KeyError, TypeError, ValueError):
+            return Response({'error': 'lat and lon are required numbers.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            return Response({'error': 'lat/lon out of range.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(check_pin(lat, lon))
 
 
 class FarmListCreateView(generics.ListCreateAPIView):
@@ -54,8 +70,26 @@ class AdminFarmListView(generics.ListAPIView):
     """GET /api/farms/all/ — admin view of every farm with owner info."""
     serializer_class   = AdminFarmSerializer
     permission_classes = [IsAdminUser]
-    queryset           = Farm.objects.select_related('user').all()
     pagination_class   = None
+
+    def get_queryset(self):
+        # Prefetch the data AdminFarmSerializer needs so "latest scan" and
+        # "latest yield" per farm don't each fire a query (was 2 × N+1).
+        from django.db.models import Prefetch
+        from apps.environmental.models import EnvironmentalScan
+        from apps.progress.models import FarmCycle
+        return (
+            Farm.objects
+            .select_related('user')
+            .prefetch_related(
+                Prefetch('scans',
+                         queryset=EnvironmentalScan.objects.order_by('-scanned_at'),
+                         to_attr='prefetched_scans'),
+                Prefetch('farm_cycles',
+                         queryset=FarmCycle.objects.select_related('yield_record'),
+                         to_attr='prefetched_cycles'),
+            )
+        )
 
 
 class AdminFarmDeleteView(APIView):

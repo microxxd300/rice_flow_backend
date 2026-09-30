@@ -69,7 +69,20 @@ class AdminUserListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        users = User.objects.all().order_by('-date_joined')
+        from django.db.models import Prefetch, Count
+        from apps.farms.models import Farm
+        # Annotate the total farm count and prefetch each user's active farms so
+        # _user_payload doesn't fire 2 queries per user (was 2 × N+1).
+        users = (
+            User.objects
+            .annotate(farm_count_anno=Count('farms'))
+            .prefetch_related(Prefetch(
+                'farms',
+                queryset=Farm.objects.filter(is_active=True).order_by('-created_at'),
+                to_attr='active_farms',
+            ))
+            .order_by('-date_joined')
+        )
         return Response([_user_payload(u) for u in users])
 
     def post(self, request):
@@ -142,10 +155,12 @@ def _user_payload(u):
     # Real GPS location comes from the user's active farm pin (Nominatim
     # has already resolved its barangay). Fall back to the registered
     # typed address if the user has not pinned a farm yet.
-    active_farm = (
-        u.farms.filter(is_active=True).order_by('-created_at').first()
-        if u.is_authenticated or True else None
-    )
+    # Uses AdminUserListView's prefetched active farms when present (avoids N+1).
+    prefetched = getattr(u, 'active_farms', None)
+    if prefetched is not None:
+        active_farm = prefetched[0] if prefetched else None
+    else:
+        active_farm = u.farms.filter(is_active=True).order_by('-created_at').first()
     if active_farm:
         gps_payload = {
             'has_gps':       True,
@@ -176,7 +191,7 @@ def _user_payload(u):
         'is_active':    u.is_active,
         'is_staff':     u.is_staff,
         'is_superuser': u.is_superuser,
-        'farm_count':   u.farms.count(),
+        'farm_count':   getattr(u, 'farm_count_anno', None) if getattr(u, 'farm_count_anno', None) is not None else u.farms.count(),
         'date_joined':  u.date_joined.isoformat(),
         'last_login':   u.last_login.isoformat() if u.last_login else None,
         'barangay':     u.barangay or '',

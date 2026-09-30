@@ -27,7 +27,7 @@ class AdminFarmCycleListView(APIView):
     def get(self, request):
         cycles = (
             FarmCycle.objects
-                .select_related('farm__user', 'variety', 'current_stage')
+                .select_related('farm__user', 'variety', 'current_stage', 'yield_record')
                 .order_by('-planting_date', '-id')
         )
 
@@ -92,7 +92,11 @@ class FarmCycleListCreateView(ListCreateAPIView):
     serializer_class = FarmCycleSerializer
 
     def get_queryset(self):
-        qs = FarmCycle.objects.filter(farm__user=self.request.user)
+        # select_related avoids N+1: the serializer's yield_per_ha reads the
+        # reverse one-to-one yield_record, and FK fields are joined up front.
+        qs = (FarmCycle.objects
+              .filter(farm__user=self.request.user)
+              .select_related('yield_record', 'farm', 'variety', 'current_stage'))
         farm_id = self.request.query_params.get('farm_id')
         if farm_id:
             qs = qs.filter(farm_id=farm_id)
@@ -104,7 +108,9 @@ class FarmCycleDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = FarmCycleSerializer
 
     def get_queryset(self):
-        return FarmCycle.objects.filter(farm__user=self.request.user)
+        return (FarmCycle.objects
+                .filter(farm__user=self.request.user)
+                .select_related('yield_record', 'farm', 'variety', 'current_stage'))
 
 
 class ProgressLogListCreateView(ListCreateAPIView):

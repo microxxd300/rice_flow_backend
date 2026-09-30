@@ -18,6 +18,11 @@ class Farm(models.Model):
     ecosystem    = models.CharField(max_length=30, choices=ECOSYSTEM_CHOICES, default='irrigated_lowland')
     elevation_m  = models.FloatField(null=True, blank=True)
     slope_pct    = models.FloatField(null=True, blank=True)
+    # Result of location_check.check_pin() at save time: 'ok', 'unchecked', or a
+    # warning reason ('on_building', 'built_up', 'water', 'mangrove')
+    location_flag      = models.CharField(max_length=20, blank=True, default='')
+    # True when the farmer kept a pin despite a location warning — for admin review
+    location_confirmed = models.BooleanField(default=False)
     is_active    = models.BooleanField(default=True)
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)

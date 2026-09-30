@@ -67,9 +67,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
+        # is_superuser distinguishes a full admin from an agriculturist:
+        # both are staff, only the admin is a superuser.
         fields = ['id', 'username', 'email', 'first_name', 'last_name',
                   'phone', 'barangay', 'municipality', 'province', 'is_staff',
-                  'has_farm']
+                  'is_superuser', 'has_farm']
 
     def get_has_farm(self, obj):
         return obj.farms.filter(is_active=True).exists()
