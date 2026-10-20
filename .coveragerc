@@ -1,0 +1,9 @@
+[run]
+source = apps, config
+omit =
+    */migrations/*
+    */tests.py
+    venv/*
+
+[report]
+skip_empty = True

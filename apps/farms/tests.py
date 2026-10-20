@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest import skipUnless
 
 import numpy as np
 from django.test import SimpleTestCase
@@ -7,6 +8,11 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.farms import location_check as lc
 from apps.farms.serializers import FarmSerializer
 from apps.farms.views import FarmLocationCheckView
+
+# The clipped land-data files are gitignored (rebuild with `manage.py load_land_data`),
+# so tests that read them skip where the files are absent, e.g. in CI.
+HAS_LAND_DATA = lc.LANDCOVER_FILE.exists() and lc.BUILDINGS_FILE.exists()
+needs_land_data = skipUnless(HAS_LAND_DATA, 'land data missing: run manage.py load_land_data')
 
 
 def _pixel_center(code: int, skip_buildings: bool = True):
@@ -28,6 +34,7 @@ def _building_center():
     return float(lat), float(lon)
 
 
+@needs_land_data
 class CheckPinTests(SimpleTestCase):
     def test_data_files_present(self):
         self.assertIsNotNone(lc._landcover())
@@ -73,6 +80,7 @@ class CheckLocationEndpointTests(SimpleTestCase):
         self.assertEqual(self._get({'lat': 'x', 'lon': '125.6'}).status_code, 400)
         self.assertEqual(self._get({'lat': '95', 'lon': '125.6'}).status_code, 400)
 
+    @needs_land_data
     def test_returns_check_result(self):
         lat, lon = _building_center()
         res = self._get({'lat': lat, 'lon': lon})
