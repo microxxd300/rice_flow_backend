@@ -21,3 +21,6 @@ notebooks/artifacts/
 # Test coverage output
 .coverage
 coverage.xml
+
+# Docker Compose environment (copy from .env.docker.example)
+.env.docker
