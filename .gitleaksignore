@@ -1,2 +1,5 @@
 # Reviewed false positive: truncated example JWT in API_REFERENCE.md (not a real token)
 24ad057e07d194698d3436ab32bd68314376d09a:API_REFERENCE.md:generic-api-key:107
+
+# Reviewed false positive: empty SUPABASE_ANON_KEY placeholder in .env.docker.example (no real key)
+227b0001341cc56dbc33d70aa21b522ed76a1a98:.env.docker.example:generic-api-key:21
