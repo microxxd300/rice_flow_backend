@@ -1,5 +1,4 @@
 from django.contrib import admin
-from django.utils.html import format_html
 from .models import ClusterModel, Recommendation, RecommendationResult
 from .clustering import train_all_models
 from apps.varieties.models import RiceVariety

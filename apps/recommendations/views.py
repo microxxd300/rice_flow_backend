@@ -4,13 +4,13 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework import status
-from apps.farms.models import Farm
 from apps.environmental.models import EnvironmentalScan
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
 from .models import ClusterModel, Recommendation, RecommendationResult, SuitabilityRuleSet
 from .scoring import calculate_rsi, default_rules_payload
 from .clustering import train_all_models, predict_cluster
+from .fit_explanation import build_fit_explanation
 from .serializers import (
     RecommendationSerializer, ClusterModelSerializer, SuitabilityRuleSetSerializer
 )
@@ -140,6 +140,15 @@ class GenerateRecommendationView(APIView):
         )
 
         for i, r in enumerate(top3, 1):
+            # Farm-specific "why it fits" text, built from this farm's real RSI
+            # factor scores. Truthful, instant, stored once so the mobile detail
+            # page reads it without any per-view work.
+            fit = build_fit_explanation(
+                r['variety'].common_name,
+                r['rsi_score'],
+                r['suitability_class'],
+                r['factor_scores'],
+            )
             RecommendationResult.objects.create(
                 recommendation=rec,
                 variety=r['variety'],
@@ -148,6 +157,7 @@ class GenerateRecommendationView(APIView):
                 suitability_class=r['suitability_class'],
                 variety_cluster=r['variety_cluster'],
                 factor_scores=r['factor_scores'],
+                fit_explanation=fit,
             )
 
         # Auto-create an active FarmCycle so the admin's Farm Cycle
@@ -207,5 +217,9 @@ class RecommendationHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, farm_id):
-        recs = Recommendation.objects.filter(farm__id=farm_id, farm__user=request.user)
+        # prefetch results + their varieties: the serializer nests
+        # RecommendationResult -> variety, which is N+1 without this.
+        recs = (Recommendation.objects
+                .filter(farm__id=farm_id, farm__user=request.user)
+                .prefetch_related('results__variety'))
         return Response(RecommendationSerializer(recs, many=True).data)

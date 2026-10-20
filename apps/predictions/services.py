@@ -243,15 +243,42 @@ def predict_yield(features: dict) -> dict:
     """
     from apps.predictions.models import YieldPredictionModel
 
-    active = YieldPredictionModel.objects.filter(is_active=True).first()
-    if not active or not os.path.exists(active.model_file):
+    def _heuristic(reason: str) -> dict:
         base = float(features.get('variety_avg_yield', 5.0))
         return {'predicted_yield_t_ha': round(base * 0.85, 2),
-                'model_used': 'heuristic', 'r2_score': None}
+                'model_used': 'heuristic', 'r2_score': None, 'note': reason}
 
-    pipe = joblib.load(active.model_file)
-    X    = engineer_features(encode_features(features))
-    pred = float(pipe.predict(X)[0])
+    active = YieldPredictionModel.objects.filter(is_active=True).first()
+    if not active or not os.path.exists(active.model_file):
+        return _heuristic('no trained model available')
+
+    try:
+        pipe = joblib.load(active.model_file)
+    except Exception as exc:                       # pickle from another sklearn build
+        print(f'[PREDICT] could not load {active.model_file}: {exc}', flush=True)
+        return _heuristic('saved model could not be loaded')
+
+    X = engineer_features(encode_features(features))
+
+    # A model saved before the current feature set was introduced expects a
+    # different input width. Serving a heuristic is honest; silently reshaping
+    # would invent a number, and retraining is a deliberate action — not
+    # something a prediction request should trigger on its own.
+    expected = getattr(pipe, 'n_features_in_', None)
+    if expected is not None and int(expected) != X.shape[1]:
+        print(
+            f'[PREDICT] stale model artifact: expects {expected} features, '
+            f'current feature set has {X.shape[1]} — retrain to use it.',
+            flush=True,
+        )
+        return _heuristic(f'saved model is out of date ({expected} vs {X.shape[1]} features)')
+
+    try:
+        pred = float(pipe.predict(X)[0])
+    except Exception as exc:
+        print(f'[PREDICT] prediction failed: {exc}', flush=True)
+        return _heuristic('prediction failed')
+
     pred = max(1.0, min(pred, 12.0))
 
     return {

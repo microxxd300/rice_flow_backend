@@ -434,6 +434,22 @@ Use a **browser tab** instead of Postman — the browser sends a User-Agent auto
 
 ---
 
+## 💓 Health check (public, no token)
+
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/health/
+ngrok-skip-browser-warning: true
+```
+
+Response `200 OK` (or `503` if the database is down):
+```json
+{ "status": "ok", "database": "ok", "version": "<deployed git commit>" }
+```
+
+Used by the host and the CD pipeline to confirm a deploy is live. The admin-only `/api/auth/system-health/` still checks every external API.
+
+---
+
 ## 🔐 Auth (`apps/users/`)
 
 ### Register a new user
@@ -912,6 +928,7 @@ Content-Type: application/json
 | **Nominatim** | nominatim.openstreetmap.org | None | reverse geocoding |
 | **Gemini** | generativelanguage.googleapis.com | API key (server-side) | AI chat + planting guide |
 | **Our backend** | doing-haven-requisite.ngrok-free.dev/api | JWT | everything else |
+| **Health check** | /api/health/ | None | deploy and uptime checks |
 | **WLC weights** | /api/recommendations/rules/ | JWT | the validated reference-table |
 | **Recommendation** | /api/recommendations/generate/{scan_id}/ | JWT | runs RSI for all varieties |
 
