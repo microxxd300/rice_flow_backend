@@ -5,7 +5,7 @@ import requests
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.db.models import Avg, Count
+from django.db.models import Count
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -292,6 +292,28 @@ def _create_or_update_user(request, instance=None):
     )
 
 
+class HealthView(APIView):
+    """
+    GET /api/health/
+
+    Public liveness check for the host and the CD pipeline: confirms the app
+    is up and the database answers. `version` is the deployed git commit
+    (GIT_SHA, baked into the Docker image) so CD can tell the new release is
+    live. Reports no keys or user data.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        version = os.getenv('GIT_SHA', 'dev')
+        try:
+            connection.ensure_connection()
+        except Exception:
+            return Response({'status': 'error', 'database': 'unavailable', 'version': version},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'status': 'ok', 'database': 'ok', 'version': version})
+
+
 class SystemHealthView(APIView):
     """
     GET /api/auth/system-health/
@@ -354,7 +376,7 @@ class SystemHealthView(APIView):
         except Exception as e:  # noqa: BLE001
             return {
                 'key': probe['key'], 'label': probe['label'],
-                'ok': False, 'status': f'unreachable',
+                'ok': False, 'status': 'unreachable',
                 'latency_ms': None, 'error': str(e)[:120],
             }
 
@@ -426,7 +448,7 @@ class AdminStatsView(APIView):
     def get(self, request):
         from datetime import timedelta
         from django.utils import timezone
-        from django.db.models import Sum, F, FloatField, ExpressionWrapper
+        from django.db.models import Sum
         from apps.farms.models import Farm
         from apps.progress.models import YieldRecord, FarmCycle
         from apps.varieties.models import RiceVariety
