@@ -17,3 +17,7 @@ models/trained/
 *.npz
 *.pkl
 notebooks/artifacts/
+
+# Test coverage output
+.coverage
+coverage.xml
