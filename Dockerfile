@@ -15,10 +15,16 @@ COPY . .
 ARG GIT_SHA=dev
 ENV GIT_SHA=${GIT_SHA}
 
-RUN useradd --create-home app && chown -R app /app
+# Strip Windows line endings in case the repo was checked out with CRLF
+RUN sed -i 's/\r$//' docker/entrypoint.sh \
+    && useradd --create-home app \
+    && chown -R app /app
 USER app
 
 EXPOSE 8000
 
-# The host sets PORT; migrations run before the server starts
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["python", "docker/healthcheck.py"]
+
+# Runs migrate and collectstatic, then gunicorn (the host may set PORT)
+CMD ["sh", "docker/entrypoint.sh"]

@@ -1,0 +1,67 @@
+# Full RiceFlow stack: admin frontend (nginx) -> Django backend -> PostgreSQL + Redis.
+# Only the frontend port is published; backend, database, and Redis stay on the
+# private Compose network. nginx proxies /api, /admin, and /static to Django.
+#
+#   cp .env.docker.example .env.docker   # fill in values
+#   docker compose up --build
+#   open http://localhost:8080
+#
+# The frontend builds from the rice_flow_admin repo cloned next to this one
+# (override with FRONTEND_CONTEXT).
+
+name: riceflow
+
+services:
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../rice_flow_admin}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  backend:
+    build: .
+    env_file: .env.docker
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthcheck comes from the Dockerfile (python docker/healthcheck.py)
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    env_file: .env.docker
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

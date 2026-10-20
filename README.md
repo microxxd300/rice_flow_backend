@@ -26,6 +26,24 @@ python manage.py makemigrations --check --dry-run
 python manage.py test
 ```
 
+## Run the full stack with Docker
+
+Runs the admin frontend (nginx), this backend (gunicorn), PostgreSQL, and Redis. Clone [rice_flow_admin](https://github.com/microxxd300/rice_flow_admin) next to this repo first.
+
+```bash
+copy .env.docker.example .env.docker   # set SECRET_KEY, POSTGRES_PASSWORD, and the same password in DATABASE_URL
+docker compose up --build -d --wait
+```
+
+Open http://localhost:8080. Only that port is published: nginx serves the React app and proxies `/api`, `/admin`, and `/static` to Django. The backend, database, and Redis are reachable only inside the Compose network. On start, the backend runs `migrate` and `collectstatic`, then gunicorn.
+
+| Command | What it does |
+|---|---|
+| `docker compose ps` | Container status and health |
+| `docker compose logs -f backend` | Follow backend logs |
+| `docker compose down` | Stop the stack (database data is kept) |
+| `docker compose down -v` | Stop and delete the database volume |
+
 ## Branching strategy
 
 | Branch | Purpose | Protected |
