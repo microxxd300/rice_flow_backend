@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     # Apps
     'apps.accounts',
@@ -159,9 +160,12 @@ REST_FRAMEWORK = {
 
 # JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    # Short access tokens limit the damage of a leaked token; the apps refresh them on a 401
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
+    # A refresh token works once: refreshing or logging out puts it on the blacklist
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 # CORS — allow mobile app
