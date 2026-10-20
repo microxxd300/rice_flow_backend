@@ -90,6 +90,7 @@ STRICT RULES:
 
 class AIChatView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_scope = 'ai_chat'
 
     def post(self, request):
         message  = (request.data.get('message') or '').strip()
