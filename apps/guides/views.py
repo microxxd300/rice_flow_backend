@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -8,9 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import PlantingGuide, GuideStep
-from .serializers import PlantingGuideSerializer, GuideStepSerializer, GuideStepUpdateSerializer
-from apps.farms.models import Farm
-from apps.varieties.models import RiceVariety, GrowthStage
+from .serializers import PlantingGuideSerializer, GuideStepSerializer
 from apps.recommendations.models import Recommendation
 
 import os
@@ -118,15 +116,15 @@ def _format_logs(logs):
     if not logs:
         return 'no logs yet'
     lines = []
-    for l in logs:
-        if not isinstance(l, dict):
+    for log in logs:
+        if not isinstance(log, dict):
             continue
-        date   = l.get('logDate') or l.get('log_date') or ''
-        stage  = l.get('growthStage') or l.get('growth_stage') or '—'
-        issue  = l.get('observedIssue') or l.get('observed_issue') or l.get('issue_type') or 'None'
-        action = l.get('actionTaken') or l.get('action_taken') or 'None'
-        notes  = (l.get('notes') or l.get('observation') or '').strip()
-        sev    = l.get('severity') or ''
+        date   = log.get('logDate') or log.get('log_date') or ''
+        stage  = log.get('growthStage') or log.get('growth_stage') or '—'
+        issue  = log.get('observedIssue') or log.get('observed_issue') or log.get('issue_type') or 'None'
+        action = log.get('actionTaken') or log.get('action_taken') or 'None'
+        notes  = (log.get('notes') or log.get('observation') or '').strip()
+        sev    = log.get('severity') or ''
         sev_part = f" [{sev}]" if sev else ''
         lines.append(f"- {date} ({stage}): {issue}{sev_part}. Action: {action}. Notes: {notes}")
     return '\n'.join(lines)

@@ -4,7 +4,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework import status
-from apps.farms.models import Farm
 from apps.environmental.models import EnvironmentalScan
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle

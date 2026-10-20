@@ -9,7 +9,6 @@ no per-view AI call.
 Idempotent: skips varieties that already have a description unless --force.
 """
 import os
-import json
 import requests
 from django.core.management.base import BaseCommand
 from apps.varieties.models import RiceVariety
@@ -22,7 +21,9 @@ GEMINI_URL = (
 
 
 def _facts(v):
-    tol = lambda x: (x or 'unknown')
+    def tol(x):
+        return x or 'unknown'
+
     return (
         f"NSIC code: {v.nsic_code}\n"
         f"Common name: {v.common_name}\n"
