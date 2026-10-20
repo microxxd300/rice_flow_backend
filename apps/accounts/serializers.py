@@ -73,6 +73,8 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'email', 'first_name', 'last_name',
                   'phone', 'barangay', 'municipality', 'province', 'is_staff',
                   'is_superuser', 'has_farm']
+        # Roles are only changed through the admin user endpoints, never by a user on themselves
+        read_only_fields = ['id', 'is_staff', 'is_superuser']
 
     def get_has_farm(self, obj):
         return obj.farms.filter(is_active=True).exists()

@@ -158,7 +158,7 @@ class YieldRecordView(APIView):
         if hasattr(cycle, 'yield_record'):
             return Response({'detail': 'Yield record already exists. Use PATCH to update.'}, status=400)
         data = {**request.data, 'farm_cycle': cycle.id}
-        serializer = YieldRecordSerializer(data=data)
+        serializer = YieldRecordSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -170,7 +170,7 @@ class YieldRecordView(APIView):
         yr = getattr(cycle, 'yield_record', None)
         if not yr:
             return Response({'detail': 'No yield record to update.'}, status=404)
-        serializer = YieldRecordSerializer(yr, data=request.data, partial=True)
+        serializer = YieldRecordSerializer(yr, data=request.data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
