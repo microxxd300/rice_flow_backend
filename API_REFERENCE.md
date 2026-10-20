@@ -52,6 +52,24 @@ List endpoints return 20 items per page, wrapped like this:
 
 Add `?page=2` for the next page, or `?page_size=50` for bigger pages (max 100).
 
+### 5. `429 Too Many Requests`
+
+Requests are rate limited. Wait the number of seconds in the `Retry-After` response header, then try again.
+
+| What | Limit |
+|---|---|
+| Login | 10 per minute per IP |
+| Register | 10 per hour per IP |
+| AI chat | 60 per hour per user |
+| Anything else | 300 per hour logged out, 3000 per hour logged in |
+
+### 6. Tokens expire: refresh and logout
+
+- The `access_token` from login lasts **30 minutes**. After that, requests return `401`.
+- Get a new one with `POST /api/token/refresh/` and body `{"refresh": "<refresh_token>"}`. The response has a new `access` **and a new `refresh`**. Save both: each refresh token works only once.
+- Refresh tokens last **7 days**.
+- Log out with `POST /api/auth/logout/` and body `{"refresh": "<refresh_token>"}`. That refresh token stops working right away.
+
 ---
 
 ## 📋 Table of contents

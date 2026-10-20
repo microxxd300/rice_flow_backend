@@ -17,6 +17,7 @@ User = get_user_model()
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = 'register'
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -28,6 +29,7 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = 'login'
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -303,6 +305,7 @@ class HealthView(APIView):
     """
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = []  # polled by Docker and CD health checks
 
     def get(self, request):
         version = os.getenv('GIT_SHA', 'dev')

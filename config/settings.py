@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     # Apps
     'apps.accounts',
@@ -139,13 +140,32 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'config.pagination.StandardPagination',
     'PAGE_SIZE': 20,
+    # Rate limits (HTTP 429 with a Retry-After header). Counts live in the cache (Redis in Docker).
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',  # only views that set throttle_scope
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '300/hour',
+        'user': '3000/hour',
+        'login': '10/min',      # per IP: slows password guessing
+        'register': '10/hour',  # per IP: stops mass sign-ups
+        'ai_chat': '60/hour',   # per user: caps Gemini usage
+    },
+    # Proxies in front of Django (nginx, Render, ngrok) so throttles use the real client IP
+    # from X-Forwarded-For instead of a value the client could fake
+    'NUM_PROXIES': int(os.getenv('NUM_PROXIES', '1')),
 }
 
 # JWT
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    # Short access tokens limit the damage of a leaked token; the apps refresh them on a 401
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
+    # A refresh token works once: refreshing or logging out puts it on the blacklist
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 # CORS — allow mobile app

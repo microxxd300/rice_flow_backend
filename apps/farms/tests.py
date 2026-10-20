@@ -72,7 +72,7 @@ class CheckPinTests(SimpleTestCase):
 class CheckLocationEndpointTests(SimpleTestCase):
     def _get(self, params):
         req = APIRequestFactory().get('/api/farms/check-location/', params)
-        force_authenticate(req, user=SimpleNamespace(is_authenticated=True))
+        force_authenticate(req, user=SimpleNamespace(is_authenticated=True, pk=1))
         return FarmLocationCheckView.as_view()(req)
 
     def test_requires_lat_lon(self):
