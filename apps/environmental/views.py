@@ -9,13 +9,17 @@ from .models import EnvironmentalScan
 from .serializers import EnvironmentalScanSerializer
 from .services.openmeteo import get_current_weather, get_annual_rainfall, get_elevation
 from .services.soilgrids import get_soil_data
+from .services.cache import cached, location_key
+
+WEATHER_CACHE_TTL = 10 * 60
 
 
 class WeatherForecastView(APIView):
     """
     GET /api/environmental/weather/?lat=&lng=
     Returns the current weather + next 3 days of forecast for the dashboard card.
-    Pulled live from Open-Meteo (free, no key).
+    Pulled from Open-Meteo (free, no key) and cached for 10 minutes per ~1 km area,
+    shared by all users. The X-Cache response header says HIT or MISS.
     """
     permission_classes = [IsAuthenticated]
 
@@ -26,7 +30,7 @@ class WeatherForecastView(APIView):
         except (TypeError, ValueError):
             return Response({'error': 'lat and lng query params are required'}, status=400)
 
-        try:
+        def fetch():
             r = requests.get(
                 'https://api.open-meteo.com/v1/forecast',
                 params={
@@ -40,7 +44,12 @@ class WeatherForecastView(APIView):
                 timeout=10,
             )
             r.raise_for_status()
-            data = r.json()
+            return r.json()
+
+        try:
+            # 2 decimal places is about 1 km, finer than Open-Meteo's forecast grid
+            data, hit = cached(location_key('openmeteo:hourly', lat, lng, places=2),
+                               WEATHER_CACHE_TTL, fetch)
         except Exception as e:
             return Response({'error': f'Open-Meteo unavailable: {e}'}, status=502)
 
@@ -76,7 +85,7 @@ class WeatherForecastView(APIView):
 
         wind_kph_raw = cur.get('wind_speed_10m') or 0
 
-        return Response({
+        response = Response({
             'current': {
                 'temperature':    cur.get('temperature_2m'),
                 'weather_code':   cur.get('weather_code'),
@@ -88,6 +97,8 @@ class WeatherForecastView(APIView):
             },
             'hourly': next_hourly,
         })
+        response['X-Cache'] = 'HIT' if hit else 'MISS'
+        return response
 
 WEATHER_FALLBACK = {
     'avg_temperature': 27.0, 'temp_at_flowering': 27.0,

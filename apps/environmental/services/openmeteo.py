@@ -1,16 +1,23 @@
 import requests
 
+from .cache import cached_by_location
+
 FORECAST_URL  = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL   = "https://archive-api.open-meteo.com/v1/archive"
 ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
 
+HOUR = 60 * 60
+DAY  = 24 * HOUR
 
+
+@cached_by_location("openmeteo:elevation", ttl=30 * DAY)
 def get_elevation(lat: float, lon: float) -> float:
     resp = requests.get(ELEVATION_URL, params={"latitude": lat, "longitude": lon}, timeout=10)
     resp.raise_for_status()
     return resp.json().get("elevation", [0])[0]
 
 
+@cached_by_location("openmeteo:current_weather", ttl=HOUR // 2)
 def get_current_weather(lat: float, lon: float) -> dict:
     params = {
         "latitude":    lat,
@@ -45,6 +52,7 @@ def get_current_weather(lat: float, lon: float) -> dict:
     }
 
 
+@cached_by_location("openmeteo:annual_rainfall", ttl=DAY)
 def get_annual_rainfall(lat: float, lon: float) -> float:
     from datetime import date, timedelta
     end   = date.today() - timedelta(days=5)
