@@ -38,5 +38,6 @@ RiceFlow is a Django REST Framework backend for rice farmers in Panabo City. It 
 - Trace the affected route, view, serializer, and service before changing them. Reuse existing helpers before adding new ones.
 - Keep URLs (with trailing slashes), methods, request fields, response keys, status codes, and permissions unchanged unless changing them is the task.
 - Keep changes small. Add or update a focused test for behavior changes and run `python manage.py test` for the affected app.
+- Before opening a PR, run the CI checks locally: `ruff check .`, `python manage.py makemigrations --check --dry-run`, and `python manage.py test`. Follow the branching and Conventional Commits rules in `README.md`.
 - Keep secrets in `.env` and generated model files (`*.pkl`, `*.npz`, `models/trained/`) out of git.
 - Report checks that failed or were not run separately from checks that passed.
