@@ -42,6 +42,16 @@ For any POST/PUT with a JSON body, add:
 |---|---|
 | `Content-Type` | `application/json` |
 
+### 4. List responses come in pages
+
+List endpoints return 20 items per page, wrapped like this:
+
+```json
+{ "count": 105, "total_pages": 6, "next": "...?page=2", "previous": null, "results": [ ... ] }
+```
+
+Add `?page=2` for the next page, or `?page_size=50` for bigger pages (max 100).
+
 ---
 
 ## 📋 Table of contents
