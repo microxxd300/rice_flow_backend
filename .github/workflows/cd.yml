@@ -45,17 +45,22 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ env.SHA }}
 
+      # Until hosting is set up, the image is still built and pushed; only the deploy is skipped
       - name: Deploy to Render
+        id: deploy
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "::error::RENDER_DEPLOY_HOOK_URL secret is not set"; exit 1
+            echo "::notice::RENDER_DEPLOY_HOOK_URL secret is not set. Image pushed to GHCR; deploy skipped."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}&imgURL=$(printf '%s' "$IMAGE:$SHA" | jq -sRr @uri)" > /dev/null
           echo "Deploy triggered for $IMAGE:$SHA"
 
       - name: Wait for /api/health/ to report the new version
+        if: steps.deploy.outputs.skipped != 'true'
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
