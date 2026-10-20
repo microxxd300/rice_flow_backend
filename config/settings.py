@@ -1,15 +1,21 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 import dj_database_url
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
+# Secrets come from the environment only (.env locally, GitHub/host secrets in CI and production)
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('SECRET_KEY is not set. Add it to .env (see .env.example).')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+CSRF_TRUSTED_ORIGINS = [o for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -110,7 +116,6 @@ REST_FRAMEWORK = {
 }
 
 # JWT
-from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
@@ -139,3 +144,14 @@ SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', '')
 # Trained model storage path
 MODELS_DIR = BASE_DIR / 'models' / 'trained'
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Production security (the host terminates HTTPS and forwards X-Forwarded-Proto)
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
+    SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', 31536000))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
