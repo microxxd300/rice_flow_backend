@@ -3,8 +3,7 @@ import io
 
 from rest_framework import status
 from rest_framework.generics import (
-    ListAPIView, RetrieveAPIView,
-    ListCreateAPIView, RetrieveUpdateDestroyAPIView,
+    ListAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView,
 )
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response

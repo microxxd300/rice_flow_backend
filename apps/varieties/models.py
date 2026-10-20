@@ -31,6 +31,10 @@ class RiceVariety(models.Model):
     pagasa_climate_types  = models.CharField(max_length=20, default='IV')
     year_released         = models.IntegerField(null=True, blank=True)
     notes                 = models.TextField(blank=True)
+    # Farmer-friendly narrative generated once (grounded in the fields above)
+    # by `manage.py generate_variety_descriptions`. Same for every user — it
+    # describes the seed, not any specific farm.
+    ai_description        = models.TextField(blank=True, default='')
     is_active             = models.BooleanField(default=True)
 
     def __str__(self):

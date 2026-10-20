@@ -32,7 +32,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             base = validated_data.get('email', 'user').split('@')[0]
         username, n = base, 1
         while User.objects.filter(username=username).exists():
-            username = f'{base}{n}'; n += 1
+            username = f'{base}{n}'
+            n += 1
         validated_data['username'] = username
         user = User(**validated_data)
         user.set_password(password)
@@ -67,9 +68,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
+        # is_superuser distinguishes a full admin from an agriculturist:
+        # both are staff, only the admin is a superuser.
         fields = ['id', 'username', 'email', 'first_name', 'last_name',
                   'phone', 'barangay', 'municipality', 'province', 'is_staff',
-                  'has_farm']
+                  'is_superuser', 'has_farm']
 
     def get_has_farm(self, obj):
         return obj.farms.filter(is_active=True).exists()

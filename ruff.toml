@@ -1,0 +1,10 @@
+target-version = "py312"
+extend-exclude = ["venv", "notebooks", "*/migrations/*"]
+
+[lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Compact one-line class lookups (if cls == 'S1': return S1) are intentional here
+"apps/recommendations/scoring.py" = ["E701"]

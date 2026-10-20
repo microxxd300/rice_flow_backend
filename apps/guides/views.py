@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -8,9 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import PlantingGuide, GuideStep
-from .serializers import PlantingGuideSerializer, GuideStepSerializer, GuideStepUpdateSerializer
-from apps.farms.models import Farm
-from apps.varieties.models import RiceVariety, GrowthStage
+from .serializers import PlantingGuideSerializer, GuideStepSerializer
 from apps.recommendations.models import Recommendation
 
 import os
@@ -118,15 +116,15 @@ def _format_logs(logs):
     if not logs:
         return 'no logs yet'
     lines = []
-    for l in logs:
-        if not isinstance(l, dict):
+    for log in logs:
+        if not isinstance(log, dict):
             continue
-        date   = l.get('logDate') or l.get('log_date') or ''
-        stage  = l.get('growthStage') or l.get('growth_stage') or '—'
-        issue  = l.get('observedIssue') or l.get('observed_issue') or l.get('issue_type') or 'None'
-        action = l.get('actionTaken') or l.get('action_taken') or 'None'
-        notes  = (l.get('notes') or l.get('observation') or '').strip()
-        sev    = l.get('severity') or ''
+        date   = log.get('logDate') or log.get('log_date') or ''
+        stage  = log.get('growthStage') or log.get('growth_stage') or '—'
+        issue  = log.get('observedIssue') or log.get('observed_issue') or log.get('issue_type') or 'None'
+        action = log.get('actionTaken') or log.get('action_taken') or 'None'
+        notes  = (log.get('notes') or log.get('observation') or '').strip()
+        sev    = log.get('severity') or ''
         sev_part = f" [{sev}]" if sev else ''
         lines.append(f"- {date} ({stage}): {issue}{sev_part}. Action: {action}. Notes: {notes}")
     return '\n'.join(lines)
@@ -587,13 +585,30 @@ class GeneratePlantingGuideView(APIView):
 
         # Persist the generated steps as real GuideStep rows. Completion is then
         # tracked on the row (is_completed), so it survives app reinstalls and
-        # syncs across devices. Regeneration replaces the checklist wholesale —
-        # a new plan is a new checklist, so completions reset by design.
+        # syncs across devices.
+        #
+        # An explicit force=True regeneration is a NEW plan, so its checklist
+        # starts clean. But a language switch regenerates the same plan in
+        # another language — the farmer has not undone any field work, so
+        # wiping their check-offs would lose real progress. Steps are emitted
+        # one per growth stage in a stable order, so step_no maps the old
+        # completions onto the translated rows.
+        preserved = {}
+        if not force:
+            # Keep the original completion time — when the farmer actually did
+            # the work, not when they happened to switch languages.
+            preserved = dict(
+                guide.steps.filter(is_completed=True).values_list('step_no', 'completed_at')
+            )
+            if preserved:
+                print(f'[PLANTING GUIDE] carrying over {len(preserved)} completed step(s) across language change', flush=True)
+
         with transaction.atomic():
             guide.steps.all().delete()
             rows = []
             for idx, st in enumerate(steps, start=1):
                 dap = int(st.get('daysAfterPlanting', 0))
+                done = idx in preserved
                 rows.append(GuideStep(
                     guide=guide,
                     step_no=idx,   # enumerate: Gemini stepNumbers can repeat, (guide, step_no) is unique
@@ -602,6 +617,8 @@ class GeneratePlantingGuideView(APIView):
                     category=st.get('category', ''),
                     days_after_planting=dap,
                     scheduled_date=(guide.start_date + timedelta(days=dap)) if guide.start_date else None,
+                    is_completed=done,
+                    completed_at=(preserved.get(idx) or timezone.now()) if done else None,
                 ))
             GuideStep.objects.bulk_create(rows)
             guide.language = language
@@ -695,7 +712,11 @@ class PlantingGuideListView(ListAPIView):
     serializer_class = PlantingGuideSerializer
 
     def get_queryset(self):
-        return PlantingGuide.objects.filter(farm__user=self.request.user)
+        # prefetch steps + each step's growth_stage — the serializer nests both,
+        # which is N+M queries without prefetch.
+        return (PlantingGuide.objects
+                .filter(farm__user=self.request.user)
+                .prefetch_related('steps__growth_stage'))
 
 
 class PlantingGuideDetailView(RetrieveAPIView):
@@ -703,7 +724,9 @@ class PlantingGuideDetailView(RetrieveAPIView):
     serializer_class = PlantingGuideSerializer
 
     def get_queryset(self):
-        return PlantingGuide.objects.filter(farm__user=self.request.user)
+        return (PlantingGuide.objects
+                .filter(farm__user=self.request.user)
+                .prefetch_related('steps__growth_stage'))
 
 
 class MarkStepCompleteView(APIView):

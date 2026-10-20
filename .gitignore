@@ -11,3 +11,13 @@ venv/
 dist/
 build/
 models/trained/
+
+# Regenerable model + land-data artifacts (rebuilt by `manage.py load_land_data`
+# and by the training endpoints / notebook) — keep them out of git history.
+*.npz
+*.pkl
+notebooks/artifacts/
+
+# Test coverage output
+.coverage
+coverage.xml

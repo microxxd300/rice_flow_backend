@@ -165,7 +165,6 @@ def _score_categorical(value, rule):
     v = str(value).lower().strip()
     options = rule.get('options', [])
     # Match most-specific first so 'silty clay loam' isn't caught by 'clay'.
-    score_map = {S1: 'S1', S2: 'S2', S3: 'S3'}
     for length_pref in sorted({len(o['value']) for o in options}, reverse=True):
         for o in options:
             if len(o['value']) == length_pref and o['value'].lower() in v:

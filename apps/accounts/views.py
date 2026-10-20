@@ -5,7 +5,7 @@ import requests
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.db.models import Avg, Count
+from django.db.models import Count
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -69,7 +69,20 @@ class AdminUserListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        users = User.objects.all().order_by('-date_joined')
+        from django.db.models import Prefetch, Count
+        from apps.farms.models import Farm
+        # Annotate the total farm count and prefetch each user's active farms so
+        # _user_payload doesn't fire 2 queries per user (was 2 × N+1).
+        users = (
+            User.objects
+            .annotate(farm_count_anno=Count('farms'))
+            .prefetch_related(Prefetch(
+                'farms',
+                queryset=Farm.objects.filter(is_active=True).order_by('-created_at'),
+                to_attr='active_farms',
+            ))
+            .order_by('-date_joined')
+        )
         return Response([_user_payload(u) for u in users])
 
     def post(self, request):
@@ -142,10 +155,12 @@ def _user_payload(u):
     # Real GPS location comes from the user's active farm pin (Nominatim
     # has already resolved its barangay). Fall back to the registered
     # typed address if the user has not pinned a farm yet.
-    active_farm = (
-        u.farms.filter(is_active=True).order_by('-created_at').first()
-        if u.is_authenticated or True else None
-    )
+    # Uses AdminUserListView's prefetched active farms when present (avoids N+1).
+    prefetched = getattr(u, 'active_farms', None)
+    if prefetched is not None:
+        active_farm = prefetched[0] if prefetched else None
+    else:
+        active_farm = u.farms.filter(is_active=True).order_by('-created_at').first()
     if active_farm:
         gps_payload = {
             'has_gps':       True,
@@ -176,7 +191,7 @@ def _user_payload(u):
         'is_active':    u.is_active,
         'is_staff':     u.is_staff,
         'is_superuser': u.is_superuser,
-        'farm_count':   u.farms.count(),
+        'farm_count':   getattr(u, 'farm_count_anno', None) if getattr(u, 'farm_count_anno', None) is not None else u.farms.count(),
         'date_joined':  u.date_joined.isoformat(),
         'last_login':   u.last_login.isoformat() if u.last_login else None,
         'barangay':     u.barangay or '',
@@ -277,6 +292,28 @@ def _create_or_update_user(request, instance=None):
     )
 
 
+class HealthView(APIView):
+    """
+    GET /api/health/
+
+    Public liveness check for the host and the CD pipeline: confirms the app
+    is up and the database answers. `version` is the deployed git commit
+    (GIT_SHA, baked into the Docker image) so CD can tell the new release is
+    live. Reports no keys or user data.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        version = os.getenv('GIT_SHA', 'dev')
+        try:
+            connection.ensure_connection()
+        except Exception:
+            return Response({'status': 'error', 'database': 'unavailable', 'version': version},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'status': 'ok', 'database': 'ok', 'version': version})
+
+
 class SystemHealthView(APIView):
     """
     GET /api/auth/system-health/
@@ -339,7 +376,7 @@ class SystemHealthView(APIView):
         except Exception as e:  # noqa: BLE001
             return {
                 'key': probe['key'], 'label': probe['label'],
-                'ok': False, 'status': f'unreachable',
+                'ok': False, 'status': 'unreachable',
                 'latency_ms': None, 'error': str(e)[:120],
             }
 
@@ -411,7 +448,7 @@ class AdminStatsView(APIView):
     def get(self, request):
         from datetime import timedelta
         from django.utils import timezone
-        from django.db.models import Sum, F, FloatField, ExpressionWrapper
+        from django.db.models import Sum
         from apps.farms.models import Farm
         from apps.progress.models import YieldRecord, FarmCycle
         from apps.varieties.models import RiceVariety

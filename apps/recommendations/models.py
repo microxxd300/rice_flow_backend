@@ -78,6 +78,10 @@ class RecommendationResult(models.Model):
     suitability_class = models.CharField(max_length=50)
     variety_cluster   = models.IntegerField(default=0)
     factor_scores     = models.JSONField(default=dict)
+    # Per-farm "why this variety fits your farm" text, generated once when the
+    # recommendation is created (grounded in this farm's RSI + factor scores).
+    # Different per user because it reflects their farm's conditions.
+    fit_explanation   = models.TextField(blank=True, default='')
 
     class Meta:
         ordering = ['rank']

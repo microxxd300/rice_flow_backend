@@ -182,7 +182,8 @@ class RiceVarietyBriefSerializer(serializers.ModelSerializer):
         model  = RiceVariety
         fields = ['id', 'variety_id', 'nsic_code', 'common_name', 'ecosystem',
                   'avg_yield_t_ha', 'max_yield_t_ha', 'maturity_days',
-                  'submergence_tolerance', 'drought_tolerance', 'salinity_tolerance', 'notes']
+                  'submergence_tolerance', 'drought_tolerance', 'salinity_tolerance',
+                  'notes', 'ai_description']
 
 
 class RecommendationResultSerializer(serializers.ModelSerializer):
@@ -190,7 +191,7 @@ class RecommendationResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = RecommendationResult
-        fields = ['rank', 'rsi_score', 'suitability_class', 'variety_cluster', 'factor_scores', 'variety']
+        fields = ['rank', 'rsi_score', 'suitability_class', 'variety_cluster', 'factor_scores', 'fit_explanation', 'variety']
 
 
 class RecommendationSerializer(serializers.ModelSerializer):

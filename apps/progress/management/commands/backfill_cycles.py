@@ -14,7 +14,6 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.farms.models import Farm
-from apps.progress.models import FarmCycle
 from apps.recommendations.models import Recommendation
 from apps.recommendations.views import ensure_active_cycle_for_recommendation
 
