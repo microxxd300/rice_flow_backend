@@ -82,6 +82,25 @@ DATABASES = {
     )
 }
 
+# Cache — Redis when REDIS_URL is set (Docker Compose), otherwise Django's in-memory cache
+if os.getenv('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+        }
+    }
+
+# Print cache HIT/MISS lines to the console so caching can be shown in a demo
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'apps.environmental.services.cache': {'handlers': ['console'], 'level': 'INFO'},
+    },
+}
+
 AUTH_USER_MODEL = 'accounts.User'
 
 AUTH_PASSWORD_VALIDATORS = [

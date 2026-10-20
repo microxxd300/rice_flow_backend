@@ -1,5 +1,7 @@
 import requests
 
+from .cache import cached_by_location
+
 SOILGRIDS_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 
 TEXTURE_MAP = {
@@ -24,6 +26,8 @@ def _classify_texture(clay_pct: float, sand_pct: float) -> str:
     return "loam"
 
 
+# Soil properties do not change between scans
+@cached_by_location("soilgrids:soil", ttl=30 * 24 * 60 * 60)
 def get_soil_data(lat: float, lon: float) -> dict:
     params = {
         "lon":      lon,
