@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from config.exceptions import client_ip, security_log
 from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
 
 User = get_user_model()
@@ -35,6 +36,7 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        security_log.warning('login failed email=%s ip=%s', request.data.get('email'), client_ip(request))
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
