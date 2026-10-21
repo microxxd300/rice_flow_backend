@@ -99,6 +99,8 @@ LOGGING = {
     'handlers': {'console': {'class': 'logging.StreamHandler'}},
     'loggers': {
         'apps.environmental.services.cache': {'handlers': ['console'], 'level': 'INFO'},
+        # riceflow.security: failed logins, 403s, 429s; riceflow.errors: unhandled exceptions
+        'riceflow': {'handlers': ['console'], 'level': 'INFO'},
     },
 }
 
@@ -109,6 +111,15 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+# Argon2 for new passwords. The others stay so existing PBKDF2 hashes still verify;
+# Django re-hashes them with Argon2 the next time each user logs in.
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.ScryptPasswordHasher',
 ]
 
 LANGUAGE_CODE = 'en-us'
@@ -156,6 +167,8 @@ REST_FRAMEWORK = {
     # Proxies in front of Django (nginx, Render, ngrok) so throttles use the real client IP
     # from X-Forwarded-For instead of a value the client could fake
     'NUM_PROXIES': int(os.getenv('NUM_PROXIES', '1')),
+    # Logs 403s/429s and turns unexpected errors into a JSON 500 without a stack trace
+    'EXCEPTION_HANDLER': 'config.exceptions.exception_handler',
 }
 
 # JWT
