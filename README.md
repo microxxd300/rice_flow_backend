@@ -5,7 +5,7 @@
 
 Django REST Framework API for RiceFlow, a rice farming assistant for Panabo City. It serves the RiceFlow mobile app and admin dashboard: farms, environmental scans, variety recommendations (RSI scoring + K-Means), planting guides, crop progress, yield prediction (Linear Regression), and an AI chat.
 
-Endpoint details: [API_REFERENCE.md](API_REFERENCE.md). Demo steps: [API_DEMO_GUIDE.md](API_DEMO_GUIDE.md).
+Endpoint details: [API_REFERENCE.md](API_REFERENCE.md). Demo steps: [API_DEMO_GUIDE.md](API_DEMO_GUIDE.md). Capstone checklist (what was done and how to demo it): [docs/CAPSTONE.md](docs/CAPSTONE.md).
 
 ## Local setup
 
