@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User
 
 
@@ -21,6 +23,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate(self, data):
         if data['password'] != data['password2']:
             raise serializers.ValidationError({'password': 'Passwords do not match.'})
+        # AUTH_PASSWORD_VALIDATORS: length, common passwords, all-numeric, similar to name/email
+        candidate = User(email=data.get('email', ''), first_name=data.get('first_name', ''),
+                         last_name=data.get('last_name', ''))
+        try:
+            validate_password(data['password'], user=candidate)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({'password': list(e.messages)})
         return data
 
     def create(self, validated_data):
