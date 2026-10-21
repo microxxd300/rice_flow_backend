@@ -1,10 +1,11 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
 from apps.accounts.views import HealthView
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path(settings.ADMIN_URL, admin.site.urls),  # DJANGO_ADMIN_URL
     path('api/health/',          HealthView.as_view(), name='health'),
     path('api/auth/',            include('apps.accounts.urls')),
     path('api/farms/',           include('apps.farms.urls')),

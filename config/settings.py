@@ -17,6 +17,12 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 CSRF_TRUSTED_ORIGINS = [o for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o]
 
+# Django admin path. Set a hard-to-guess one in production, e.g. admin/x7k2q9/. It must start
+# with admin/ because the admin frontend's nginx only forwards /api/, /admin/ and /static/.
+ADMIN_URL = os.getenv('DJANGO_ADMIN_URL', 'admin/')
+if not (ADMIN_URL.startswith('admin/') and ADMIN_URL.endswith('/')):
+    raise ImproperlyConfigured('DJANGO_ADMIN_URL must start with "admin/" and end with "/", e.g. admin/x7k2q9/')
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -181,16 +187,18 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
-# CORS — allow mobile app
+# CORS — browser origins allowed to call the API (the native mobile app doesn't need CORS).
+# Production: CORS_ALLOWED_ORIGINS=https://admin.example.com (comma-separated).
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = [
+_DEV_CORS_ORIGINS = ','.join([
     'http://localhost:8081',
     'http://localhost:19006',
     'http://127.0.0.1:8081',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://192.168.1.100:5173',  # Replace with your actual IP address
-]
+])
+CORS_ALLOWED_ORIGINS = [o for o in (os.getenv('CORS_ALLOWED_ORIGINS') or _DEV_CORS_ORIGINS).split(',') if o]
 
 # Panabo City constants
 PANABO_LAT = float(os.getenv('PANABO_LAT', 7.3086))
