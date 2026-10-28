@@ -865,6 +865,8 @@ POST https://doing-haven-requisite.ngrok-free.dev/api/progress/cycles/
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+A farm has one active cycle at a time: creating (or re-activating) a second one returns
+`400 {"farm": [...]}`. Cycle responses include `variety_name` and `yield_per_ha`.
 
 ### Get one cycle
 ```
@@ -895,15 +897,19 @@ ngrok-skip-browser-warning: true
 Content-Type: application/json
 
 {
-  "cycle":          1,
-  "log_date":       "2026-06-03",
-  "growth_stage":   "Tillering",
-  "observed_issue": "Insect",
-  "severity":       "Low",
-  "action_taken":   "Sprayed pesticide",
-  "notes":          "Saw a few stem borers"
+  "farm_cycle":   1,
+  "log_date":     "2026-06-03",
+  "growth_stage": 3,
+  "issue_type":   "pest",
+  "severity":     "low",
+  "action_taken": "Sprayed pesticide",
+  "observation":  "Saw a few stem borers"
 }
 ```
+- `growth_stage` is a GrowthStage id from `GET /api/varieties/growth-stages/` (optional)
+- `issue_type`: `pest`, `disease`, `weather`, `nutrient`, `other`, or `""` for none
+- `severity`: `low`, `medium`, `high`, or `""`
+- `observation` is required
 
 ### Get the yield record for a cycle
 ```
@@ -927,6 +933,9 @@ Content-Type: application/json
   "moisture_pct":      14.0
 }
 ```
+Creating the yield record (POST) marks the cycle `completed` and sets its
+`actual_harvest_date`, so the farm's next recommendation starts a new cycle.
+Use PATCH on the same URL to correct a saved record.
 
 ---
 
