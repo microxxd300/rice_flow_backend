@@ -9,7 +9,8 @@ from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
 from .models import ClusterModel, Recommendation, RecommendationResult, SuitabilityRuleSet
 from .scoring import calculate_rsi, default_rules_payload
-from .clustering import train_all_models, predict_cluster
+from .clustering import predict_cluster
+from .training import train_and_record
 from .fit_explanation import build_fit_explanation
 from .serializers import (
     RecommendationSerializer, ClusterModelSerializer, SuitabilityRuleSetSerializer
@@ -172,32 +173,12 @@ class TrainModelsView(APIView):
     permission_classes = [IsAdminUser]
 
     def post(self, request):
-        varieties = list(RiceVariety.objects.filter(is_active=True))
-        if len(varieties) < 4:
-            return Response({'error': 'Need at least 4 varieties to cluster.'}, status=400)
-
-        results, _ = train_all_models(varieties)
-
-        # Drop rows for algorithms we no longer train (e.g. legacy
-        # agglomerative/dbscan entries from older versions).
-        ClusterModel.objects.exclude(name__in=list(results.keys())).delete()
-
-        saved = []
-        for name, res in results.items():
-            cm, _ = ClusterModel.objects.update_or_create(
-                name=name,
-                defaults={
-                    'training_time_ms': res['training_time_ms'],
-                    'silhouette_score': res['silhouette'],
-                    'davies_bouldin':   res['davies_bouldin'],
-                    'n_clusters':       res['n_clusters'],
-                    # K-Means is the only model — make it active immediately.
-                    'is_active':        True,
-                }
-            )
-            saved.append(ClusterModelSerializer(cm).data)
-
-        return Response({'models': saved, 'message': 'Training complete. K-Means is now the active model.'})
+        try:
+            saved = train_and_record()
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+        return Response({'models': ClusterModelSerializer(saved, many=True).data,
+                         'message': 'Training complete. K-Means is now the active model.'})
 
 
 class SetActiveModelView(APIView):

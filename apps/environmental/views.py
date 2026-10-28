@@ -7,7 +7,7 @@ from rest_framework import status
 from apps.farms.models import Farm
 from .models import EnvironmentalScan
 from .serializers import EnvironmentalScanSerializer
-from .services.openmeteo import get_current_weather, get_annual_rainfall, get_elevation
+from .services.openmeteo import current_season, get_current_weather, get_elevation, get_rainfall_summary
 from .services.soilgrids import get_soil_data
 from .services.cache import cached, location_key
 from .services.sampling import combine_soil, sample_points
@@ -137,12 +137,17 @@ class ScanFarmView(APIView):
         points = sample_points(lat, lon, farm.area_hectares)
         with ThreadPoolExecutor(max_workers=3 + len(points)) as ex:
             f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
-            f_annual    = ex.submit(_safe, get_annual_rainfall,  lat, lon, fallback=1800.0)
+            f_rain      = ex.submit(_safe, get_rainfall_summary, lat, lon)
             f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
             f_soils     = [ex.submit(_safe, get_soil_data, p_lat, p_lon) for p_lat, p_lon in points]
 
         weather   = f_weather.result()
-        annual    = f_annual.result()
+        rain      = f_rain.result()
+        # Seasonal rainfall = rain in this season's months over the last year (the RSI rule and
+        # the yield model expect a whole season, about 1,000-1,500 mm), not this week x 4
+        season = current_season()
+        annual   = rain['annual'] if rain else 1800.0
+        seasonal = rain[f'{season}_season'] if rain else annual / 2
         elevation = f_elevation.result()
         soil_samples = [s for s in (f.result() for f in f_soils) if s]  # failed points are skipped
         if soil_samples:
@@ -171,7 +176,7 @@ class ScanFarmView(APIView):
             avg_temperature=weather['avg_temperature'],
             temp_at_flowering=weather['temp_at_flowering'],
             annual_rainfall_mm=annual,
-            seasonal_rainfall_mm=weather['weekly_rainfall_mm'] * 4,
+            seasonal_rainfall_mm=seasonal,
             humidity_pct=weather['humidity_pct'],
             solar_radiation=weather['solar_radiation'],
             wind_speed_ms=weather['wind_speed_ms'],
