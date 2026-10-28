@@ -77,7 +77,8 @@ class CombineSoilTests(SimpleTestCase):
 
 
 @mock.patch('apps.environmental.views.get_elevation', return_value=20.0)
-@mock.patch('apps.environmental.views.get_annual_rainfall', return_value=2000.0)
+@mock.patch('apps.environmental.views.get_rainfall_summary',
+            return_value={'annual': 2600.0, 'wet_season': 1500.0, 'dry_season': 1100.0})
 @mock.patch('apps.environmental.views.get_current_weather', return_value={
     'avg_temperature': 27.0, 'temp_at_flowering': 27.0, 'weekly_rainfall_mm': 100.0,
     'humidity_pct': 80.0, 'solar_radiation': 17.0, 'wind_speed_ms': 2.0, 'sunshine_hours': 6.0})
@@ -146,3 +147,23 @@ class OrganicMatterUnitTests(TestCase):
         resp = mock.Mock(**{'json.return_value': {'properties': {'layers': []}}})
         with mock.patch('requests.get', return_value=resp):
             self.assertEqual(get_soil_data(7.34, 125.62)['organic_matter'], 2.5)
+
+
+class SeasonalRainfallTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_rain_is_split_into_wet_and_dry_season_months(self):
+        from apps.environmental.services.openmeteo import get_rainfall_summary
+        daily = {'time': ['2025-11-15', '2026-03-01', '2026-06-10', '2026-09-30'],
+                 'precipitation_sum': [100.0, 50.0, 300.0, None]}
+        resp = mock.Mock(**{'json.return_value': {'daily': daily}})
+        with mock.patch('requests.get', return_value=resp):
+            self.assertEqual(get_rainfall_summary(7.33, 125.62),
+                             {'annual': 450.0, 'wet_season': 300.0, 'dry_season': 150.0})
+
+    def test_current_season(self):
+        from datetime import date
+        from apps.environmental.services.openmeteo import current_season
+        self.assertEqual(current_season(date(2026, 10, 28)), 'wet')
+        self.assertEqual(current_season(date(2026, 1, 15)), 'dry')

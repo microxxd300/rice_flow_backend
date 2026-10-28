@@ -69,3 +69,23 @@ class CrossUserWriteTests(TestCase):
         record.refresh_from_db()
         self.assertEqual(r.status_code, 400)
         self.assertEqual(record.farm_cycle, self.my_cycle)
+
+
+class CycleDefaultsTests(TestCase):
+    def test_new_cycle_gets_expected_harvest_and_first_stage(self):
+        from apps.varieties.models import GrowthStage, RiceVariety
+        user = User.objects.create_user(username='planter', password='pass12345')
+        farm = make_farm(user)
+        variety = RiceVariety.objects.create(variety_id='T1', nsic_code='Rc222', common_name='Tubigan 18',
+                                             ecosystem='irrigated_lowland', season='both', maturity_days=113,
+                                             avg_yield_t_ha=5.2, max_yield_t_ha=8.0)
+        stage = GrowthStage.objects.create(stage_no=1, bbch_min=0, bbch_max=9, name='Land prep', days_min_paddy=0,
+                                           days_max_paddy=14, days_min_upland=0, days_max_upland=14,
+                                           what_to_do='-', water_management='-')
+        client = APIClient()
+        client.force_authenticate(user)
+        r = client.post('/api/progress/cycles/', {'farm': farm.id, 'variety': variety.id, 'season': 'wet',
+                                                  'year': 2026, 'planting_date': '2026-10-01'}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['expected_harvest_date'], '2027-01-22')  # 1 Oct + 113 days
+        self.assertEqual(r.json()['current_stage'], stage.id)

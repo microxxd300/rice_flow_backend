@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from apps.farms.models import Farm
+from apps.varieties.models import GrowthStage
 from .models import FarmCycle, ProgressLog, YieldRecord
 
 
@@ -28,6 +31,16 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     def get_yield_per_ha(self, obj):
         yr = getattr(obj, 'yield_record', None)
         return yr.yield_per_ha if yr else None
+
+    def create(self, validated_data):
+        # Same defaults as the cycle the recommendation step creates, so a cycle started
+        # from the app's progress screens is not left without a harvest date or stage
+        variety, planted = validated_data.get('variety'), validated_data.get('planting_date')
+        if not validated_data.get('expected_harvest_date') and variety and variety.maturity_days and planted:
+            validated_data['expected_harvest_date'] = planted + timedelta(days=int(variety.maturity_days))
+        if not validated_data.get('current_stage'):
+            validated_data['current_stage'] = GrowthStage.objects.order_by('stage_no').first()
+        return super().create(validated_data)
 
 
 class ProgressLogSerializer(serializers.ModelSerializer):

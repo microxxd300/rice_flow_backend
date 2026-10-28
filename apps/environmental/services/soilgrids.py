@@ -36,7 +36,8 @@ def get_soil_data(lat: float, lon: float) -> dict:
         "depth":    "0-5cm",
         "value":    "mean",
     }
-    resp = requests.get(SOILGRIDS_URL, params=params, timeout=15)
+    # SoilGrids is a free research service and often takes 20-40 s to answer
+    resp = requests.get(SOILGRIDS_URL, params=params, timeout=40)
     resp.raise_for_status()
 
     props = {p["name"]: p["depths"][0]["values"]["mean"]
