@@ -10,6 +10,7 @@ from .serializers import EnvironmentalScanSerializer
 from .services.openmeteo import get_current_weather, get_annual_rainfall, get_elevation
 from .services.soilgrids import get_soil_data
 from .services.cache import cached, location_key
+from .services.sampling import combine_soil, sample_points
 
 WEATHER_CACHE_TTL = 10 * 60
 
@@ -131,17 +132,25 @@ class ScanFarmView(APIView):
         lat = float(farm.latitude)
         lon = float(farm.longitude)
 
-        # Run all external API calls in parallel with individual fallbacks
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        # Soil is read at several points across the farm's area (see services/sampling.py);
+        # weather, rainfall and elevation at the pin. All calls run in parallel with fallbacks.
+        points = sample_points(lat, lon, farm.area_hectares)
+        with ThreadPoolExecutor(max_workers=3 + len(points)) as ex:
             f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
             f_annual    = ex.submit(_safe, get_annual_rainfall,  lat, lon, fallback=1800.0)
             f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
-            f_soil      = ex.submit(_safe, get_soil_data,         lat, lon, fallback=SOIL_FALLBACK)
+            f_soils     = [ex.submit(_safe, get_soil_data, p_lat, p_lon) for p_lat, p_lon in points]
 
         weather   = f_weather.result()
         annual    = f_annual.result()
         elevation = f_elevation.result()
-        soil      = f_soil.result()
+        soil_samples = [s for s in (f.result() for f in f_soils) if s]  # failed points are skipped
+        if soil_samples:
+            soil, soil_sampling = combine_soil(soil_samples)
+        else:
+            soil = SOIL_FALLBACK
+            soil_sampling = {'points': 0, 'points_without_data': 0, 'estimated': True,
+                             'ph_range': None, 'clay_pct_range': None, 'varies': False, 'message': ''}
 
         slope = request.data.get('slope_pct', farm.slope_pct or 1.0)
 
@@ -175,7 +184,9 @@ class ScanFarmView(APIView):
         farm.elevation_m = elevation
         farm.save(update_fields=['elevation_m'])
 
-        return Response(EnvironmentalScanSerializer(scan).data, status=status.HTTP_201_CREATED)
+        data = EnvironmentalScanSerializer(scan).data
+        data['soil_sampling'] = soil_sampling  # points read, pH/clay ranges, 'varies' warning
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class ScanHistoryView(APIView):

@@ -568,6 +568,17 @@ ngrok-skip-browser-warning: true
 
 **What this does:** The backend gets the farm's GPS coordinates, then **calls SoilGrids and Open-Meteo in parallel** using ThreadPoolExecutor. It saves the combined result as one row in `environmental_scans`. This is the data later used by RSI scoring.
 
+**Soil across the whole farm:** soil is read at the pin **plus points north, east, south and west of it**, spread over the farm's `area_hectares` (one point per 250 m SoilGrids pixel, so usually 1–5 points). The readings are averaged; points where SoilGrids has no data (built-up areas, water) are left out. Weather, rainfall and elevation are read at the pin, since their grids are bigger than a farm. The extra `soil_sampling` field reports what happened:
+
+| Field | Meaning |
+|---|---|
+| `points` | soil points used in the average |
+| `points_without_data` | points skipped because SoilGrids had no data there |
+| `estimated` | `true` when no point had data, so the soil values are defaults |
+| `ph_range`, `clay_pct_range` | lowest and highest reading across the points |
+| `varies` | `true` when pH differs by more than 0.5 or clay by more than 10 points |
+| `message` | when `varies`: advice to register the different parts of the land as separate farms |
+
 **Response example:**
 ```json
 {
@@ -581,7 +592,12 @@ ngrok-skip-browser-warning: true
   "seasonal_rainfall_mm": 1800,
   "humidity_pct": 82,
   "elevation_m": 45,
-  "flood_risk": "Low"
+  "flood_risk": "Low",
+  "soil_sampling": {
+    "points": 3, "points_without_data": 0, "estimated": false,
+    "ph_range": [5.2, 5.3], "clay_pct_range": [35.9, 37.4],
+    "varies": false, "message": ""
+  }
 }
 ```
 

@@ -1,0 +1,130 @@
+from unittest import mock
+
+from django.core.cache import cache
+from django.test import SimpleTestCase, TestCase
+from rest_framework.test import APIClient
+
+from apps.accounts.models import User
+from apps.environmental.models import EnvironmentalScan
+from apps.environmental.services.sampling import (
+    M_PER_DEG_LAT, VARIES_MESSAGE, combine_soil, sample_points,
+)
+from apps.farms.models import Farm
+
+PIN = (7.3086, 125.6830)
+
+
+def soil(ph, clay, sand=30.0):
+    return {'ph': ph, 'clay_pct': clay, 'sand_pct': sand, 'silt_pct': 100 - clay - sand,
+            'organic_matter': 2.5, 'bulk_density': 1.3, 'nitrogen_ppm': 15.0, 'cec': 20.0,
+            'texture': 'ignored', 'drainage': 'ignored'}
+
+
+class SamplePointsTests(SimpleTestCase):
+    def test_no_area_means_pin_only(self):
+        self.assertEqual(sample_points(*PIN, None), [PIN])
+        self.assertEqual(sample_points(*PIN, 0), [PIN])
+
+    def test_points_start_at_the_pin_and_stay_inside_the_farm(self):
+        points = sample_points(*PIN, 40)  # 40 ha: radius ~357 m, samples at ~250 m
+        self.assertEqual(points[0], PIN)
+        self.assertGreater(len(points), 1)
+        for lat, lon in points[1:]:
+            north_south_m = abs(lat - PIN[0]) * M_PER_DEG_LAT
+            self.assertLess(north_south_m, 357)
+
+    def test_points_in_the_same_soil_pixel_are_queried_once(self):
+        # 0.5 ha: samples ~28 m from the pin, mostly inside the pin's 250 m SoilGrids pixel
+        self.assertLessEqual(len(sample_points(*PIN, 0.5)), 3)
+
+
+class CombineSoilTests(SimpleTestCase):
+    def test_averages_and_rederives_texture(self):
+        combined, sampling = combine_soil([soil(6.0, 38), soil(6.2, 40)])
+        self.assertEqual(combined['ph'], 6.1)
+        self.assertEqual(combined['clay_pct'], 39.0)
+        self.assertEqual(combined['texture'], 'clay loam')        # from the averaged clay/sand
+        self.assertEqual(combined['drainage'], 'poorly drained')  # clay > 35
+        self.assertEqual(sampling['points'], 2)
+        self.assertFalse(sampling['varies'])
+        self.assertEqual(sampling['message'], '')
+
+    def test_large_ph_spread_is_flagged(self):
+        _, sampling = combine_soil([soil(5.6, 30), soil(6.4, 31)])
+        self.assertTrue(sampling['varies'])
+        self.assertEqual(sampling['ph_range'], [5.6, 6.4])
+        self.assertEqual(sampling['message'], VARIES_MESSAGE)
+
+    def test_large_clay_spread_is_flagged(self):
+        _, sampling = combine_soil([soil(6.0, 25), soil(6.0, 40)])
+        self.assertTrue(sampling['varies'])
+
+    def test_points_without_soilgrids_data_are_left_out(self):
+        default = {**soil(6.2, 35), 'from_soilgrids': False}   # built-up area: defaults only
+        real = {**soil(5.2, 37.4), 'from_soilgrids': True}
+        combined, sampling = combine_soil([default, real])
+        self.assertEqual(combined['ph'], 5.2)
+        self.assertEqual(sampling['points'], 1)
+        self.assertEqual(sampling['points_without_data'], 1)
+        self.assertFalse(sampling['estimated'])
+
+    def test_no_point_with_data_is_marked_estimated(self):
+        default = {**soil(6.2, 35), 'from_soilgrids': False}
+        combined, sampling = combine_soil([default, default])
+        self.assertEqual(combined['ph'], 6.2)  # same values as before sampling existed
+        self.assertTrue(sampling['estimated'])
+
+
+@mock.patch('apps.environmental.views.get_elevation', return_value=20.0)
+@mock.patch('apps.environmental.views.get_annual_rainfall', return_value=2000.0)
+@mock.patch('apps.environmental.views.get_current_weather', return_value={
+    'avg_temperature': 27.0, 'temp_at_flowering': 27.0, 'weekly_rainfall_mm': 100.0,
+    'humidity_pct': 80.0, 'solar_radiation': 17.0, 'wind_speed_ms': 2.0, 'sunshine_hours': 6.0})
+class ScanSamplingTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username='farmer', password='pass12345')
+        self.farm = Farm.objects.create(user=self.user, name='Big farm', barangay='Gredu',
+                                        latitude=PIN[0], longitude=PIN[1], area_hectares=40)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def scan(self):
+        return self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
+
+    def test_scan_averages_soil_across_the_farm(self, *_):
+        readings = iter([soil(5.6, 30), soil(6.4, 32), soil(6.0, 31), soil(6.0, 31), soil(6.0, 31)])
+        with mock.patch('apps.environmental.views.get_soil_data', side_effect=lambda lat, lon: next(readings)) as get:
+            r = self.scan()
+
+        self.assertEqual(r.status_code, 201)
+        sampling = r.json()['soil_sampling']
+        self.assertEqual(sampling['points'], get.call_count)
+        self.assertGreater(sampling['points'], 1)
+        self.assertTrue(sampling['varies'])
+        self.assertEqual(sampling['message'], VARIES_MESSAGE)
+        saved = EnvironmentalScan.objects.get(pk=r.json()['id'])
+        self.assertEqual(saved.soil_ph, r.json()['soil_ph'])
+        self.assertTrue(5.6 < saved.soil_ph < 6.4)
+
+    def test_failed_points_are_skipped(self, *_):
+        calls = {'n': 0}
+
+        def flaky(lat, lon):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                raise ConnectionError('SoilGrids timeout')
+            return soil(6.2, 33)
+
+        with mock.patch('apps.environmental.views.get_soil_data', side_effect=flaky):
+            r = self.scan()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['soil_sampling']['points'], calls['n'] - 1)
+        self.assertEqual(r.json()['soil_ph'], 6.2)
+
+    def test_all_points_failing_uses_the_fallback(self, *_):
+        with mock.patch('apps.environmental.views.get_soil_data', side_effect=ConnectionError):
+            r = self.scan()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['soil_sampling']['points'], 0)
+        self.assertEqual(r.json()['soil_ph'], 6.2)  # SOIL_FALLBACK

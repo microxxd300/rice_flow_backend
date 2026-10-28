@@ -26,8 +26,8 @@ def _classify_texture(clay_pct: float, sand_pct: float) -> str:
     return "loam"
 
 
-# Soil properties do not change between scans
-@cached_by_location("soilgrids:soil", ttl=30 * 24 * 60 * 60)
+# Soil properties do not change between scans. v2: results carry from_soilgrids
+@cached_by_location("soilgrids:soil:v2", ttl=30 * 24 * 60 * 60)
 def get_soil_data(lat: float, lon: float) -> dict:
     params = {
         "lon":      lon,
@@ -41,6 +41,8 @@ def get_soil_data(lat: float, lon: float) -> dict:
 
     props = {p["name"]: p["depths"][0]["values"]["mean"]
              for p in resp.json().get("properties", {}).get("layers", [])}
+    # SoilGrids has no values for built-up areas and water; the defaults below fill the gaps
+    from_soilgrids = any(v is not None for v in props.values())
 
     ph        = round((props.get("phh2o") or 62)  / 10, 1)   # SoilGrids pH×10; 62 = pH 6.2
     clay      = round((props.get("clay")  or 350) / 10, 1)   # g/kg → %
@@ -64,4 +66,5 @@ def get_soil_data(lat: float, lon: float) -> dict:
         "nitrogen_ppm":    nitrogen,
         "cec":             cec,
         "drainage":        "poorly drained" if clay > 35 else "moderately drained",
+        "from_soilgrids":  from_soilgrids,  # False: every value is a default, not a measurement
     }
