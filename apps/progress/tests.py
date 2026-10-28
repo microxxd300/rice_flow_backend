@@ -36,7 +36,8 @@ class CrossUserWriteTests(TestCase):
         return {'farm_cycle': cycle.id, 'log_date': '2026-06-02', 'observation': 'ok'}
 
     def test_create_cycle_on_own_farm(self):
-        r = self.client.post('/api/progress/cycles/', self.cycle_payload(self.my_farm), format='json')
+        # A farm without an active season (my_farm already has one)
+        r = self.client.post('/api/progress/cycles/', self.cycle_payload(make_farm(self.me)), format='json')
         self.assertEqual(r.status_code, 201)
 
     def test_cannot_create_cycle_on_other_users_farm(self):
@@ -89,3 +90,58 @@ class CycleDefaultsTests(TestCase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.json()['expected_harvest_date'], '2027-01-22')  # 1 Oct + 113 days
         self.assertEqual(r.json()['current_stage'], stage.id)
+        self.assertEqual(r.json()['variety_name'], 'Tubigan 18')
+
+
+class SeasonLifecycleTests(TestCase):
+    """A farm has one active season at a time, and recording the harvest ends it."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='grower', password='pass12345')
+        self.farm = make_farm(self.user)
+        self.cycle = make_cycle(self.farm)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def new_cycle(self):
+        return self.client.post('/api/progress/cycles/', {'farm': self.farm.id, 'season': 'dry', 'year': 2027,
+                                                          'planting_date': '2027-01-10'}, format='json')
+
+    def harvest(self):
+        return self.client.post(f'/api/progress/cycles/{self.cycle.id}/yield/',
+                                {'harvest_date': '2026-10-01', 'area_harvested_ha': 1,
+                                 'gross_yield_kg': 4500, 'net_yield_kg': 4200}, format='json')
+
+    def test_second_active_cycle_is_refused(self):
+        r = self.new_cycle()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('farm', r.json())
+        self.assertEqual(FarmCycle.objects.filter(farm=self.farm, status='active').count(), 1)
+
+    def test_harvest_completes_the_cycle(self):
+        self.assertEqual(self.harvest().status_code, 201)
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'completed')
+        self.assertEqual(str(self.cycle.actual_harvest_date), '2026-10-01')
+
+    def test_new_cycle_allowed_after_harvest(self):
+        self.harvest()
+        self.assertEqual(self.new_cycle().status_code, 201)
+
+    def test_cannot_reactivate_cycle_while_another_is_active(self):
+        self.harvest()
+        self.new_cycle()
+        r = self.client.patch(f'/api/progress/cycles/{self.cycle.id}/', {'status': 'active'}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+
+class LogSeverityTests(TestCase):
+    def test_severity_is_saved(self):
+        user = User.objects.create_user(username='logger', password='pass12345')
+        cycle = make_cycle(make_farm(user))
+        client = APIClient()
+        client.force_authenticate(user)
+        r = client.post('/api/progress/logs/', {'farm_cycle': cycle.id, 'log_date': '2026-06-02', 'observation': 'Leaf folder',
+                                                'issue_type': 'pest', 'severity': 'medium'}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(ProgressLog.objects.get(pk=r.json()['id']).severity, 'medium')
