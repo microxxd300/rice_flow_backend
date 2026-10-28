@@ -9,6 +9,7 @@ from apps.environmental.models import EnvironmentalScan
 from apps.environmental.services.sampling import (
     M_PER_DEG_LAT, VARIES_MESSAGE, combine_soil, sample_points,
 )
+from apps.environmental.services.soilgrids import get_soil_data
 from apps.farms.models import Farm
 
 PIN = (7.3086, 125.6830)
@@ -128,3 +129,20 @@ class ScanSamplingTests(TestCase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.json()['soil_sampling']['points'], 0)
         self.assertEqual(r.json()['soil_ph'], 6.2)  # SOIL_FALLBACK
+
+
+class OrganicMatterUnitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_soc_in_dg_per_kg_becomes_organic_matter_percent(self):
+        layers = [{'name': 'soc', 'depths': [{'values': {'mean': 613}}]}]  # SOC 61.3 g/kg = 6.13 %
+        resp = mock.Mock(**{'json.return_value': {'properties': {'layers': layers}}})
+        with mock.patch('requests.get', return_value=resp):
+            soil = get_soil_data(7.33, 125.62)
+        self.assertEqual(soil['organic_matter'], round(6.13 * 1.724, 2))  # 10.57 %, not 61.3
+
+    def test_missing_soc_keeps_the_default(self):
+        resp = mock.Mock(**{'json.return_value': {'properties': {'layers': []}}})
+        with mock.patch('requests.get', return_value=resp):
+            self.assertEqual(get_soil_data(7.34, 125.62)['organic_matter'], 2.5)

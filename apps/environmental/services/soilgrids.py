@@ -26,8 +26,8 @@ def _classify_texture(clay_pct: float, sand_pct: float) -> str:
     return "loam"
 
 
-# Soil properties do not change between scans. v2: results carry from_soilgrids
-@cached_by_location("soilgrids:soil:v2", ttl=30 * 24 * 60 * 60)
+# Soil properties do not change between scans. v3: organic matter in % (was 10x too high)
+@cached_by_location("soilgrids:soil:v3", ttl=30 * 24 * 60 * 60)
 def get_soil_data(lat: float, lon: float) -> dict:
     params = {
         "lon":      lon,
@@ -48,7 +48,10 @@ def get_soil_data(lat: float, lon: float) -> dict:
     clay      = round((props.get("clay")  or 350) / 10, 1)   # g/kg → %
     sand      = round((props.get("sand")  or 300) / 10, 1)
     silt      = round((props.get("silt")  or 350) / 10, 1)
-    soc       = round((props.get("soc")   or 25)  / 10, 2)   # dg/kg → %; 25 = 2.5%
+    # SOC in dg/kg -> % (÷100), then organic matter = SOC × 1.724 (Van Bemmelen factor).
+    # The suitability rule scores organic matter in % (S1 ≥ 3, S2 ≥ 2, S3 ≥ 1).
+    # 145 dg/kg (SOC 1.45%) gives the old 2.5% organic matter default.
+    soc       = round((props.get("soc")   or 145) / 100 * 1.724, 2)
     bulk_dens = round((props.get("bdod")  or 130) / 100, 2)  # cg/cm³ → g/cm³
     nitrogen  = round((props.get("nitrogen") or 1500) / 100, 1)  # cg/kg → mg/kg
     cec       = round((props.get("cec")  or 200) / 10, 1)    # mmol/kg → cmol/kg

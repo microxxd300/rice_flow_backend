@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .location_check import check_pin, location_flag
+from .location_check import MESSAGES, check_pin, in_panabo, location_flag
 from .models import Farm
 
 
@@ -9,8 +9,17 @@ class FarmSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['user', 'location_flag', 'created_at', 'updated_at']
 
-    # Warn, never block: the app asks the farmer before saving; here we only record
-    # the result so admins can review pins kept despite a warning.
+    # Outside Panabo City is refused. Inside, warn, never block: the app asks the farmer
+    # before saving; here we only record the result so admins can review pins kept
+    # despite a warning.
+    def validate(self, attrs):
+        lat = attrs.get('latitude', getattr(self.instance, 'latitude', None))
+        lon = attrs.get('longitude', getattr(self.instance, 'longitude', None))
+        moved = self.instance is None or (lat, lon) != (self.instance.latitude, self.instance.longitude)
+        if moved and lat is not None and lon is not None and not in_panabo(float(lat), float(lon)):
+            raise serializers.ValidationError({'latitude': MESSAGES['outside_panabo']})
+        return attrs
+
     def create(self, validated_data):
         validated_data['location_flag'] = self._flag(validated_data['latitude'], validated_data['longitude'])
         return super().create(validated_data)
