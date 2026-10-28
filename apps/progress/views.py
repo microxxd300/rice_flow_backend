@@ -160,7 +160,11 @@ class YieldRecordView(APIView):
         data = {**request.data, 'farm_cycle': cycle.id}
         serializer = YieldRecordSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        record = serializer.save()
+        # A harvest ends the season, so the farm's next recommendation can start a new cycle
+        cycle.status = 'completed'
+        cycle.actual_harvest_date = record.harvest_date
+        cycle.save(update_fields=['status', 'actual_harvest_date'])
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def patch(self, request, cycle_id):

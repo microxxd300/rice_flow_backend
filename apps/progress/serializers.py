@@ -23,6 +23,7 @@ class OwnFarmCycleField(serializers.PrimaryKeyRelatedField):
 class FarmCycleSerializer(serializers.ModelSerializer):
     farm = OwnFarmField()
     yield_per_ha = serializers.SerializerMethodField()
+    variety_name = serializers.CharField(source='variety.common_name', read_only=True, default=None)
 
     class Meta:
         model = FarmCycle
@@ -31,6 +32,21 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     def get_yield_per_ha(self, obj):
         yr = getattr(obj, 'yield_record', None)
         return yr.yield_per_ha if yr else None
+
+    def validate(self, attrs):
+        # One active season per farm: the progress screens and the recommendation
+        # step both assume a single active cycle
+        farm = attrs.get('farm', getattr(self.instance, 'farm', None))
+        status = attrs.get('status', getattr(self.instance, 'status', 'active'))
+        if farm and status == 'active':
+            others = FarmCycle.objects.filter(farm=farm, status='active')
+            if self.instance:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError(
+                    {'farm': 'This farm already has an active season. Complete it before starting another.'}
+                )
+        return attrs
 
     def create(self, validated_data):
         # Same defaults as the cycle the recommendation step creates, so a cycle started

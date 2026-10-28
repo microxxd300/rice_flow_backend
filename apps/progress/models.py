@@ -42,12 +42,14 @@ class ProgressLog(models.Model):
         ('nutrient', 'Nutrient Deficiency'),
         ('other',    'Other'),
     ]
+    SEVERITY_CHOICES = [('low', 'Low'), ('medium', 'Medium'), ('high', 'High')]
 
     farm_cycle    = models.ForeignKey(FarmCycle, on_delete=models.CASCADE, related_name='progress_logs')
     log_date      = models.DateField()
     growth_stage  = models.ForeignKey(GrowthStage, on_delete=models.SET_NULL, null=True, blank=True)
     observation   = models.TextField()
     issue_type    = models.CharField(max_length=15, choices=ISSUE_CHOICES, blank=True)
+    severity      = models.CharField(max_length=10, choices=SEVERITY_CHOICES, blank=True)
     action_taken  = models.TextField(blank=True)
     photo_url     = models.URLField(blank=True)
     created_at    = models.DateTimeField(auto_now_add=True)
