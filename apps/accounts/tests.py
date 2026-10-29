@@ -30,3 +30,11 @@ class ProfileRoleTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(r.status_code, 200)
         self.assertEqual(self.user.first_name, 'Juan')
+
+    def test_login_email_and_username_cannot_be_changed_here(self):
+        r = self.client.patch('/api/auth/profile/', {'email': 'other@x.com', 'username': 'boss',
+                                                     'barangay': 'Nanyo'}, format='json')
+        self.user.refresh_from_db()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((self.user.email, self.user.username), ('f@x.com', 'farmer'))
+        self.assertEqual(self.user.barangay, 'Nanyo')
