@@ -7,12 +7,38 @@ from rest_framework import status
 from apps.farms.models import Farm
 from .models import EnvironmentalScan
 from .serializers import EnvironmentalScanSerializer
-from .services.openmeteo import current_season, get_current_weather, get_elevation, get_rainfall_summary
+from .services.openmeteo import (
+    MONTHLY_YEARS, current_season, get_current_weather, get_elevation, get_monthly_rainfall,
+    get_rainfall_summary,
+)
 from .services.soilgrids import get_soil_data
 from .services.cache import cached, location_key
 from .services.sampling import combine_soil, sample_points
 
 WEATHER_CACHE_TTL = 10 * 60
+
+
+class MonthlyRainfallView(APIView):
+    """
+    GET /api/environmental/monthly-rainfall/?lat=&lng=
+    Average rain per calendar month (mm, Jan..Dec) at the point over the last 3 full
+    years, from the Open-Meteo archive. The planting calendar is built from this.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            lat = float(request.query_params.get('lat'))
+            lng = float(request.query_params.get('lng'))
+        except (TypeError, ValueError):
+            return Response({'error': 'lat and lng query params are required'}, status=400)
+        try:
+            months = get_monthly_rainfall(lat, lng)
+        except requests.RequestException:
+            return Response({'error': 'Rainfall data is unavailable right now.'}, status=503)
+        from datetime import date
+        last = date.today().year - 1
+        return Response({'months': months, 'years': f'{last - MONTHLY_YEARS + 1}-{last}'})
 
 
 class WeatherForecastView(APIView):

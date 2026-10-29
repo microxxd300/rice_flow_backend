@@ -137,11 +137,41 @@ class OrganicMatterUnitTests(TestCase):
         cache.clear()
 
     def test_soc_in_dg_per_kg_becomes_organic_matter_percent(self):
-        layers = [{'name': 'soc', 'depths': [{'values': {'mean': 613}}]}]  # SOC 61.3 g/kg = 6.13 %
+        layers = [{'name': 'soc', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': 613}}]}]  # 6.13 % SOC
         resp = mock.Mock(**{'json.return_value': {'properties': {'layers': layers}}})
         with mock.patch('requests.get', return_value=resp):
             soil = get_soil_data(7.33, 125.62)
         self.assertEqual(soil['organic_matter'], round(6.13 * 1.724, 2))  # 10.57 %, not 61.3
+
+    def test_root_zone_median_is_weighted_by_layer_thickness(self):
+        # Panabo pixel: median SOC 351 / 221 / 136 dg/kg; the mean (1085+) is a long-tail artefact
+        depths = [{'label': '0-5cm',   'values': {'Q0.5': 351, 'mean': 1085}},
+                  {'label': '5-15cm',  'values': {'Q0.5': 221, 'mean': 1137}},
+                  {'label': '15-30cm', 'values': {'Q0.5': 136, 'mean': 1226}}]
+        resp = mock.Mock(**{'json.return_value': {'properties': {'layers': [{'name': 'soc', 'depths': depths}]}}})
+        with mock.patch('requests.get', return_value=resp) as get:
+            soil = get_soil_data(7.35, 125.62)
+        # (351*5 + 221*10 + 136*15) / 30 = 200.2 dg/kg = 2.0 % SOC → 3.45 % organic matter
+        self.assertEqual(soil['organic_matter'], round(200.1667 / 100 * 1.724, 2))
+        self.assertEqual(get.call_args.kwargs['params']['value'], 'Q0.5')
+
+    def test_wms_is_used_when_the_rest_api_is_down(self):
+        import requests
+        from apps.environmental.services import soilgrids
+
+        def fake_get(url, params=None, timeout=None):
+            if url == soilgrids.SOILGRIDS_URL:
+                raise requests.ConnectionError('REST API paused')
+            value = {'soc': 200, 'phh2o': 52}.get(params['map'].split('/')[-1][:-4], 0)
+            return mock.Mock(**{'raise_for_status.return_value': None,
+                                'text': f'<b>Value: </b><span id="value">{value}</span><br>'})
+
+        with mock.patch('requests.get', side_effect=fake_get) as get:
+            soil = get_soil_data(7.36, 125.62)
+        self.assertEqual(soil['organic_matter'], round(2.0 * 1.724, 2))
+        self.assertEqual(soil['ph'], 5.2)
+        self.assertTrue(soil['from_soilgrids'])
+        self.assertEqual(get.call_count, 1 + 8 * 3)     # REST, then 8 properties x 3 depths
 
     def test_missing_soc_keeps_the_default(self):
         resp = mock.Mock(**{'json.return_value': {'properties': {'layers': []}}})

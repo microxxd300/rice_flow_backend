@@ -3,9 +3,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework import status
 
+from apps.farms.models import Farm
+from apps.varieties.models import RiceVariety
+
 from .models import YieldPredictionModel
 from .serializers import YieldPredictionModelSerializer
-from .services import train_all_models, predict_yield
+from .services import train_all_models, predict_yield, seed_type_for
 
 
 class ModelComparisonView(APIView):
@@ -37,10 +40,29 @@ class TrainModelsView(APIView):
 
 
 class PredictYieldView(APIView):
-    """POST /api/predictions/predict/ — predict yield for a farm scan."""
+    """
+    POST /api/predictions/predict/ — predict yield for a farm scan.
+
+    Optional farm_id and variety_id fill in what the real-harvest model needs
+    (barangay, ecosystem, seed type) when the request doesn't send them.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        features = request.data
-        result   = predict_yield(features)
+        features = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
+
+        farm = Farm.objects.filter(pk=features.get('farm_id'), user=request.user).first() \
+            if str(features.get('farm_id') or '').isdigit() else None
+        if farm:
+            features.setdefault('barangay', farm.barangay)
+            features.setdefault('ecosystem', farm.ecosystem)
+
+        variety = RiceVariety.objects.filter(pk=features.get('variety_id')).first() \
+            if str(features.get('variety_id') or '').isdigit() else None
+        if variety:
+            features.setdefault('seed_type', seed_type_for(variety))
+            features.setdefault('maturity_days', variety.maturity_days)
+            features.setdefault('variety_avg_yield', variety.avg_yield_t_ha)
+
+        result = predict_yield(features)
         return Response(result, status=status.HTTP_200_OK)

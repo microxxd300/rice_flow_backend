@@ -212,6 +212,10 @@ SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', '')
 MODELS_DIR = BASE_DIR / 'models' / 'trained'
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+# DA harvest-report CSV for the yield model (barangay-level, kept out of git).
+# Empty = train on app YieldRecords or the synthetic dataset instead.
+YIELD_TRAINING_CSV = os.getenv('YIELD_TRAINING_CSV', '')
+
 # Production security (the host terminates HTTPS and forwards X-Forwarded-Proto)
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
