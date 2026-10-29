@@ -87,3 +87,29 @@ def get_rainfall_summary(lat: float, lon: float) -> dict:
         else:
             dry += mm
     return {"annual": round(wet + dry, 1), "wet_season": round(wet, 1), "dry_season": round(dry, 1)}
+
+
+MONTHLY_YEARS = 3
+
+
+@cached_by_location("openmeteo:monthly_rainfall", ttl=7 * DAY)
+def get_monthly_rainfall(lat: float, lon: float) -> list[float]:
+    """Average rain per calendar month (mm, Jan..Dec) over the last 3 full years at the farm."""
+    from datetime import date
+    last_year = date.today().year - 1
+    params = {
+        "latitude":   lat,
+        "longitude":  lon,
+        "start_date": f"{last_year - MONTHLY_YEARS + 1}-01-01",
+        "end_date":   f"{last_year}-12-31",
+        "daily":      "precipitation_sum",
+        "timezone":   "Asia/Manila",
+    }
+    resp = requests.get(ARCHIVE_URL, params=params, timeout=20)
+    resp.raise_for_status()
+    daily = resp.json().get("daily", {})
+    totals = [0.0] * 12
+    for day, mm in zip(daily.get("time", []), daily.get("precipitation_sum", [])):
+        if mm is not None:
+            totals[int(day[5:7]) - 1] += mm
+    return [round(t / MONTHLY_YEARS, 1) for t in totals]
