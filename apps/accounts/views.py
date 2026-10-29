@@ -47,7 +47,10 @@ class ProfileView(APIView):
         return Response(UserSerializer(request.user).data)
 
     def patch(self, request):
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        # Email and username are the login, so a farmer can't change them here (like the
+        # role fields); the admin user endpoints can
+        data = {k: v for k, v in request.data.items() if k not in ('email', 'username')}
+        serializer = UserSerializer(request.user, data=data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
