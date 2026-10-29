@@ -173,6 +173,23 @@ class OrganicMatterUnitTests(TestCase):
         self.assertTrue(soil['from_soilgrids'])
         self.assertEqual(get.call_count, 1 + 8 * 3)     # REST, then 8 properties x 3 depths
 
+    def test_wms_is_used_when_the_rest_api_returns_only_nulls(self):
+        from apps.environmental.services import soilgrids
+        nulls = {'properties': {'layers': [
+            {'name': 'soc', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': None}}]}]}}
+
+        def fake_get(url, params=None, timeout=None):
+            if url == soilgrids.SOILGRIDS_URL:
+                return mock.Mock(**{'raise_for_status.return_value': None, 'json.return_value': nulls})
+            value = 200 if params['map'] == '/map/soc.map' else 0
+            return mock.Mock(**{'raise_for_status.return_value': None,
+                                'text': f'<span id="value">{value}</span>'})
+
+        with mock.patch('requests.get', side_effect=fake_get):
+            soil = get_soil_data(7.37, 125.62)
+        self.assertTrue(soil['from_soilgrids'])
+        self.assertEqual(soil['organic_matter'], round(2.0 * 1.724, 2))
+
     def test_missing_soc_keeps_the_default(self):
         resp = mock.Mock(**{'json.return_value': {'properties': {'layers': []}}})
         with mock.patch('requests.get', return_value=resp):
