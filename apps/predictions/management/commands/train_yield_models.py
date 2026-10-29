@@ -1,11 +1,13 @@
 """
-python manage.py train_yield_models
+python manage.py train_yield_models [--csv PATH]
 
-Trains the Linear Regression yield model (real YieldRecords when >= 30 exist,
-otherwise the agronomy-calibrated synthetic dataset). Reports test R2/MAE/RMSE
-plus 5-fold CV in notes. Safe to re-run anytime.
+Trains the Linear Regression yield model. Data, in order of preference: the DA
+harvest-report CSV (--csv, else the YIELD_TRAINING_CSV setting), real
+YieldRecords when >= 30 exist, otherwise the agronomy-calibrated synthetic
+dataset. Reports test R2/MAE/RMSE, with validation details in notes. Safe to
+re-run anytime.
 """
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from apps.predictions.models import YieldPredictionModel
 from apps.predictions.services import train_all_models
 
@@ -13,10 +15,16 @@ from apps.predictions.services import train_all_models
 class Command(BaseCommand):
     help = 'Train the Linear Regression yield prediction model'
 
+    def add_arguments(self, parser):
+        parser.add_argument('--csv', help='Harvest-report training CSV (overrides YIELD_TRAINING_CSV)')
+
     def handle(self, *args, **options):
         self.stdout.write('Training yield prediction models...')
 
-        results = train_all_models()
+        try:
+            results = train_all_models(options.get('csv'))
+        except (FileNotFoundError, ValueError) as e:
+            raise CommandError(f'Could not train: {e}')
         YieldPredictionModel.objects.all().delete()
 
         for r in results:
@@ -29,6 +37,7 @@ class Command(BaseCommand):
                 f"RMSE={r['rmse']:.4f}"
                 f"{active_label}"
             )
+            self.stdout.write(f"  {r['notes']}")
 
         best = max(results, key=lambda x: x['r2_score'])
         self.stdout.write(self.style.SUCCESS(
