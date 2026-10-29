@@ -24,6 +24,47 @@ GEMINI_URL = (
 )
 GUIDE_CATEGORIES = ['planting', 'fertilizer', 'pest_prevention', 'irrigation', 'harvesting']
 
+# Guide timeline: day 0 = sowing, the same start the farm cycle's planting_date and its
+# expected harvest (planting_date + maturity_days) use. NSIC maturity is counted from sowing.
+SEEDLING_AGE_DAYS = 21   # seedlings are transplanted 20-25 days after sowing
+
+
+def _current_day(farm) -> int:
+    """Days since the farm's active cycle started (0 when there is no active cycle)."""
+    cycle = farm.farm_cycles.filter(status='active').order_by('-planting_date').first()
+    return max(0, (timezone.now().date() - cycle.planting_date).days) if cycle else 0
+
+
+def _season_rules(variety, current_day: int) -> str:
+    """Timeline, water and weather rules both guide prompts share, so Gemini can't put
+    harvest on the wrong day, drain at heading, or apply this week's forecast to January."""
+    harvest = int(variety.maturity_days)
+    return (
+        "TIMELINE: daysAfterPlanting counts from SOWING (day 0). "
+        f"Seedlings are transplanted about day {SEEDLING_AGE_DAYS}. The variety matures {harvest} days "
+        f"after sowing, so harvest is day {harvest} and no step may be later than day {harvest}. "
+        "When an instruction mentions timing, count days from sowing like daysAfterPlanting, "
+        "never days after transplanting.\n"
+        f"KEY DAYS: tillering about day {SEEDLING_AGE_DAYS + 10} to {harvest - 65}, panicle initiation "
+        f"about day {harvest - 60} (put the panicle-initiation fertilizer there), flowering about "
+        f"day {harvest - 30}.\n"
+        "WATER (PhilRice/IRRI): keep 2-5 cm of standing water from panicle initiation "
+        f"(about day {harvest - 60}) through flowering (about day {harvest - 30}). Never drain "
+        "before or during heading and flowering. Drain the field 10-14 days before harvest "
+        f"(about day {harvest - 14} to {harvest - 10}).\n"
+        f"WEATHER: the farm is on day {current_day}. The 7-day forecast only applies to steps due "
+        f"between day {current_day} and day {current_day + 7}; never mention the forecast or "
+        "specific calendar dates in later steps.\n"
+    )
+
+
+def _fit_to_season(steps: list, variety) -> list:
+    """Keep every step on or before harvest day (the prompt asks; this enforces it)."""
+    harvest = int(variety.maturity_days)
+    for st in steps:
+        st['daysAfterPlanting'] = min(int(st.get('daysAfterPlanting', 0)), harvest)
+    return steps
+
 # ── Persisted-guide response shape ─────────────────────────────────────────────
 # Steps are saved as GuideStep rows; responses carry the real DB id so the
 # mobile app's completion sync (PATCH steps/<id>/complete/) targets real rows.
@@ -132,7 +173,7 @@ def _format_logs(logs):
 
 # ── Single-step generation: ask Gemini for ONE follow-up step in a category. ──
 # Used by the "check a step → reveal a fresh one at the bottom" flow on mobile.
-def _generate_one_step(variety, scan, logs, forecast, language, category, last_day, base_index):
+def _generate_one_step(variety, scan, logs, forecast, language, category, last_day, base_index, current_day=0):
     """Ask Gemini for a single new follow-up step in the given category, dated after `last_day`."""
     if not GEMINI_API_KEY:
         return None
@@ -175,6 +216,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
         f"Field conditions: {field}.\n\n"
         f"Next 7 days weather forecast: {forecast_str}.\n\n"
         f"Recent farmer observations:\n{logs_str}\n\n"
+        f"{_season_rules(variety, current_day)}\n"
         f"REQUIRED CATEGORY for the new step: {category}.\n"
         f"REQUIRED daysAfterPlanting: an integer STRICTLY GREATER THAN {last_day} so the "
         "new step appears AFTER the just-finished one. Pick a sensible timing for this category.\n"
@@ -233,6 +275,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
         # Enforce that the new step lands strictly after the one the farmer just finished
         if day <= last_day:
             day = last_day + 7
+        day = min(day, int(variety.maturity_days))   # never after harvest
 
         return {
             'id':                f'step_{base_index:03d}',
@@ -248,7 +291,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
 
 
 # ── Gemini call — uses variety + scan + logs + forecast for adaptive guidance ──
-def _generate_ai_steps(variety, scan, logs, forecast, language='en'):
+def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day=0):
     """Ask Gemini for a personalized planting guide that adapts to the farmer's logs + weather."""
     if not GEMINI_API_KEY:
         print('[PLANTING GUIDE] ✗ GEMINI_API_KEY not set in environment — cannot call Gemini', flush=True)
@@ -305,10 +348,14 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en'):
         "conditions AND the upcoming weather AND the farmer's recent observations.\n"
         "- If farmer logged pest sightings → add specific pest_prevention steps for that exact pest.\n"
         "- If logs mention yellowing leaves or nutrient deficiency → add a fertilizer adjustment.\n"
-        "- If forecast shows heavy rain → add drainage or delay the next fertilizer.\n"
+        "- If the forecast shows heavy rain → for steps due in the next 7 days, add drainage "
+        "or delay the next fertilizer.\n"
         "- If logs mention drought → add irrigation steps.\n\n"
+        f"{_season_rules(variety, current_day)}\n"
         f"{lang_directive}\n\n"
-        "Order steps by daysAfterPlanting (negative numbers = before planting).\n\n"
+        "Order steps by daysAfterPlanting (negative numbers = before sowing).\n"
+        "Include at least one step in EVERY category, including pest_prevention "
+        "(scouting for stem borer, leaf folder, rice bug, blast and sheath blight).\n\n"
         "OUTPUT FORMAT — return ONLY valid JSON, no markdown, no code fences, no explanation. "
         "Start with `{` and end with `}`. Use this exact shape:\n"
         '{"steps":[{"stepNumber":1,"title":"...","instruction":"...","daysAfterPlanting":-15,"category":"planting"}]}\n\n'
@@ -405,7 +452,7 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en'):
             })
 
         print(f'[PLANTING GUIDE] ✓ Accepted {len(out)} steps (rejected {rejected})', flush=True)
-        return out
+        return _fit_to_season(out, variety)
 
     except requests.Timeout:
         print('[PLANTING GUIDE] ✗ Gemini timeout (>40s)', flush=True)
@@ -422,24 +469,26 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en'):
         return []
 
 
-def _fallback_steps(language='en'):
+def _fallback_steps(language='en', maturity_days=115):
     """Template fallback used if Gemini is unavailable. Returns English steps by default
     so the user sees something usable when the AI service is down."""
 
     # English fallback that doesn't depend on whatever language the GrowthStage rows
     # were originally seeded in. Static and stable — keeps the demo defendable.
+    # Day 0 = sowing (same timeline as _season_rules); late steps follow the variety's maturity
+    m, t = int(maturity_days), SEEDLING_AGE_DAYS
     en_template = [
-        ('Land Preparation',      'Plow the field twice and level it. Drain old water and remove weeds.', -15, 'planting'),
-        ('Seedbed Preparation',   'Prepare a 1m-wide seedbed with fine, fertile soil for the seedlings.', -10, 'planting'),
-        ('Sowing',                'Sow pre-germinated seeds evenly on the seedbed and keep it moist.', -7, 'planting'),
-        ('Transplanting',         'Transplant 20-25 day old seedlings at 20×20 cm spacing.', 0, 'planting'),
-        ('Basal Fertilizer',      'Apply complete fertilizer (14-14-14) at 5 bags/ha before transplanting.', 0, 'fertilizer'),
-        ('First Water Management', 'Maintain 2-3 cm shallow water level for the first 2 weeks.', 3, 'irrigation'),
-        ('Top-dressing (Tillering)', 'Apply urea (46-0-0) at 2 bags/ha to support active tillering.', 20, 'fertilizer'),
-        ('Pest Monitoring',       'Scout for stem borer and rice bug; treat only when threshold is reached.', 30, 'pest_prevention'),
-        ('Panicle Initiation Fertilizer', 'Apply urea (46-0-0) at 1 bag/ha when panicle starts forming.', 45, 'fertilizer'),
-        ('Drain Before Harvest',  'Drain the field 7-10 days before planned harvest date for easier harvesting.', 95, 'irrigation'),
-        ('Harvesting',            'Harvest when 80-85% of grains turn golden. Threshing should follow within 24 hours.', 105, 'harvesting'),
+        ('Seedbed Preparation',   'Prepare a 1m-wide seedbed with fine, fertile soil for the seedlings.', -3, 'planting'),
+        ('Sowing',                'Sow pre-germinated seeds evenly on the seedbed and keep it moist.', 0, 'planting'),
+        ('Land Preparation',      'Plow the field twice and level it. Drain old water and remove weeds.', 7, 'planting'),
+        ('Basal Fertilizer',      'Apply complete fertilizer (14-14-14) at 5 bags/ha before transplanting.', t - 1, 'fertilizer'),
+        ('Transplanting',         'Transplant 20-25 day old seedlings at 20×20 cm spacing.', t, 'planting'),
+        ('First Water Management', 'Maintain 2-3 cm shallow water level for the first 2 weeks.', t + 3, 'irrigation'),
+        ('Top-dressing (Tillering)', 'Apply urea (46-0-0) at 2 bags/ha to support active tillering.', t + 20, 'fertilizer'),
+        ('Pest Monitoring',       'Scout for stem borer and rice bug; treat only when threshold is reached.', t + 30, 'pest_prevention'),
+        ('Panicle Initiation Fertilizer', 'Apply urea (46-0-0) at 1 bag/ha when panicle starts forming.', m - 60, 'fertilizer'),
+        ('Drain Before Harvest',  'Drain the field 10-14 days before planned harvest date for easier harvesting.', m - 12, 'irrigation'),
+        ('Harvesting',            'Harvest when 80-85% of grains turn golden. Threshing should follow within 24 hours.', m, 'harvesting'),
     ]
 
     titles_fil = {
@@ -479,7 +528,7 @@ def _fallback_steps(language='en'):
         'Top-dressing (Tillering)':      'Maglagay ng urea (46-0-0) na 2 sako/ektarya para sa malusog na pagsibol.',
         'Pest Monitoring':               'Magbantay sa stem borer at rice bug; gamutin lamang kapag umabot sa threshold.',
         'Panicle Initiation Fertilizer': 'Maglagay ng urea (46-0-0) na 1 sako/ektarya kapag nagsimula nang magbutil.',
-        'Drain Before Harvest':          'Patuyuin ang lupa 7-10 araw bago ang ani para mas madaling anihin.',
+        'Drain Before Harvest':          'Patuyuin ang lupa 10-14 araw bago ang ani para mas madaling anihin.',
         'Harvesting':                    'Anihin kapag 80-85% ng butil ay kulay ginto. Igiik sa loob ng 24 oras.',
     }
     instr_ceb = {
@@ -492,7 +541,7 @@ def _fallback_steps(language='en'):
         'Top-dressing (Tillering)':      'Butangi og urea (46-0-0) nga 2 ka sako/ektarya para sa kusog nga pagtubo.',
         'Pest Monitoring':               'Bantayi ang stem borer ug rice bug; tambali lang kung pa-abot na sa threshold.',
         'Panicle Initiation Fertilizer': 'Butangi og urea (46-0-0) nga 1 ka sako/ektarya kung magsugod na magbunga.',
-        'Drain Before Harvest':          'Pahubsa ang yuta 7-10 ka adlaw sa wala pa moani aron mas sayon nga moani.',
+        'Drain Before Harvest':          'Pahubsa ang yuta 10-14 ka adlaw sa wala pa moani aron mas sayon nga moani.',
         'Harvesting':                    'Aniha kung 80-85% sa mga butil bulawanon na. Tahopa sulod sa 24 ka oras.',
     }
 
@@ -572,12 +621,12 @@ class GeneratePlantingGuideView(APIView):
         print(f'[PLANTING GUIDE] logs=\n{_format_logs(logs)}', flush=True)
 
         # Call Gemini (with all the adaptive context + selected language)
-        steps = _generate_ai_steps(variety, scan, logs, forecast, language)
+        steps = _generate_ai_steps(variety, scan, logs, forecast, language, _current_day(farm))
         source = 'GEMINI'
 
         # Fall back to template only if Gemini failed
         if not steps:
-            steps = _fallback_steps(language)
+            steps = _fallback_steps(language, variety.maturity_days)
             source = 'FALLBACK'
             print(f'[PLANTING GUIDE] Gemini returned 0 steps — falling back to template ({language})', flush=True)
 
@@ -680,6 +729,7 @@ class AppendGuideStepView(APIView):
         base_index = max(existing_count + 1, 12)
         step = _generate_one_step(
             variety, scan, logs, forecast, language, category, last_day, base_index,
+            _current_day(farm),
         )
         if not step:
             return Response({'detail': 'Could not generate next step right now.'}, status=503)
