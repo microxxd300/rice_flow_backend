@@ -112,6 +112,13 @@ def get_soil_data(lat: float, lon: float) -> dict:
         layers = _wms_layers(lat, lon)
 
     props = {p["name"]: _root_zone_median(p) for p in layers}
+    if layers and not any(v is not None for v in props.values()):
+        # A degraded REST API answers with nulls for pixels the WMS still has. Built-up
+        # areas and water are null in both, and the defaults below fill them in.
+        try:
+            props = {p["name"]: _root_zone_median(p) for p in _wms_layers(lat, lon)}
+        except Exception:
+            pass
     # SoilGrids has no values for built-up areas and water; the defaults below fill the gaps
     from_soilgrids = any(v is not None for v in props.values())
 
