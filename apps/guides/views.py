@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import PlantingGuide, GuideStep
 from .serializers import PlantingGuideSerializer, GuideStepSerializer
+from apps.progress.models import YieldRecord
 from apps.recommendations.models import Recommendation
 
 import os
@@ -112,6 +113,19 @@ def _chosen_result(rec, variety_pk):
         return results.filter(variety_id=int(variety_pk)).first()
     except (TypeError, ValueError):
         return None
+
+
+def _cycle_follows_pick(rec, variety):
+    """A scan starts the crop cycle with the top-ranked variety before the farmer picks
+    one. Once they pick another, that cycle follows: only the one this recommendation
+    started, and only while no field work is logged, so a real crop is never changed."""
+    cycle = rec.farm.farm_cycles.filter(status='active', created_at__gte=rec.created_at).first()
+    if (not cycle or cycle.variety_id == variety.id or cycle.progress_logs.exists()
+            or YieldRecord.objects.filter(farm_cycle=cycle).exists()):
+        return
+    cycle.variety = variety
+    cycle.expected_harvest_date = cycle.planting_date + timedelta(days=int(variety.maturity_days))
+    cycle.save(update_fields=['variety', 'expected_harvest_date'])
 
 
 # ── Open-Meteo 7-day forecast for the farm's coords ────────────────────────────
@@ -603,6 +617,8 @@ class GeneratePlantingGuideView(APIView):
             return Response({'detail': 'variety must be one of this recommendation\'s varieties.'}, status=400)
 
         variety = chosen.variety
+        if request.data.get('variety') not in (None, ''):
+            _cycle_follows_pick(rec, variety)
         farm    = rec.farm
         season  = request.data.get('season', 'Wet Season')
         language = (request.data.get('language') or 'en').lower()

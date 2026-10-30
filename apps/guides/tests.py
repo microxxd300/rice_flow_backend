@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.environmental.models import EnvironmentalScan
 from apps.farms.models import Farm
-from apps.progress.models import FarmCycle
+from apps.progress.models import FarmCycle, ProgressLog
 from apps.recommendations.models import Recommendation
 from apps.varieties.models import RiceVariety
 
@@ -108,3 +108,24 @@ class ChosenVarietyTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(one_step.call_args.args[0], self.second)
         self.assertTrue(self.rec.farm.planting_guides.filter(variety=self.second).exists())
+
+    def start_cycle(self):
+        # What a scan does (recommendations._auto_start_cycle): the top-ranked variety, today
+        return FarmCycle.objects.create(farm=self.rec.farm, variety=self.top, season='wet', year=2026,
+                                        planting_date=timezone.now().date())
+
+    @patch.object(views, '_generate_ai_steps', return_value=[AI_STEP])
+    def test_the_scans_crop_cycle_follows_the_pick(self, _ai, _forecast):
+        cycle = self.start_cycle()
+        self.client.post(self.generate_url, {'variety': self.second.id}, format='json')
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.variety, self.second)
+        self.assertEqual(cycle.expected_harvest_date, cycle.planting_date + timedelta(days=110))
+
+    @patch.object(views, '_generate_ai_steps', return_value=[AI_STEP])
+    def test_a_cycle_with_field_work_keeps_its_variety(self, _ai, _forecast):
+        cycle = self.start_cycle()
+        ProgressLog.objects.create(farm_cycle=cycle, log_date=timezone.now().date(), observation='Sown')
+        self.client.post(self.generate_url, {'variety': self.second.id}, format='json')
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.variety, self.top)
