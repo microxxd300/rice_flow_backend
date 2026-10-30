@@ -737,11 +737,13 @@ ngrok-skip-browser-warning: true
 Content-Type: application/json
 
 {
+  "variety":  12,
   "season":   "Wet Season",
   "language": "en",
   "logs":     []
 }
 ```
+`variety` is optional: the id of the variety the farmer picked. It must be one of the recommendation's results (otherwise `400`). Without it the guide keeps the variety picked earlier for this farm, or else uses the top-ranked one.
 
 ### Append one new step to a guide
 ```
@@ -754,6 +756,7 @@ Content-Type: application/json
   "category":       "fertilizer",
   "last_day":       20,
   "existing_count": 8,
+  "variety":        12,
   "language":       "en",
   "logs":           []
 }

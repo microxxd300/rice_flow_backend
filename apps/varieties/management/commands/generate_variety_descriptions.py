@@ -60,7 +60,7 @@ def _generate(v):
         },
     }
     try:
-        resp = requests.post(f'{GEMINI_URL}?key={GEMINI_API_KEY}', json=payload, timeout=30)
+        resp = requests.post(GEMINI_URL, headers={'x-goog-api-key': GEMINI_API_KEY}, json=payload, timeout=30)
         if resp.status_code != 200:
             return None
         body = resp.json()
