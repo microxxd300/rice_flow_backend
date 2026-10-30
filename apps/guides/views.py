@@ -254,7 +254,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
     }
 
     try:
-        resp = requests.post(f'{GEMINI_URL}?key={GEMINI_API_KEY}', json=payload, timeout=25)
+        resp = requests.post(GEMINI_URL, headers={'x-goog-api-key': GEMINI_API_KEY}, json=payload, timeout=25)
         if resp.status_code != 200:
             print(f'[PLANTING GUIDE/append] FAIL Gemini non-200: {resp.text[:400]}', flush=True)
             return None
@@ -313,7 +313,6 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day
     if not GEMINI_API_KEY:
         print('[PLANTING GUIDE] FAIL GEMINI_API_KEY not set in environment - cannot call Gemini', flush=True)
         return []
-    print(f'[PLANTING GUIDE] OK GEMINI_API_KEY present (len={len(GEMINI_API_KEY)}, starts with {GEMINI_API_KEY[:6]}...)', flush=True)
 
     field = (
         f"soil texture: {getattr(scan, 'soil_texture', '') or 'clay loam'}, "
@@ -392,7 +391,7 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day
     resp = None
     try:
         print(f'[PLANTING GUIDE] -> POST {GEMINI_URL} (prompt={len(prompt)} chars, logs={len(logs)}, forecast_days={len(forecast)})', flush=True)
-        resp = requests.post(f'{GEMINI_URL}?key={GEMINI_API_KEY}', json=payload, timeout=40)
+        resp = requests.post(GEMINI_URL, headers={'x-goog-api-key': GEMINI_API_KEY}, json=payload, timeout=40)
         print(f'[PLANTING GUIDE] <- Gemini HTTP {resp.status_code} (body size: {len(resp.text)} bytes)', flush=True)
 
         if resp.status_code != 200:

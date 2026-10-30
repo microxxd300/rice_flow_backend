@@ -145,7 +145,8 @@ class AIChatView(APIView):
 
         try:
             resp = requests.post(
-                f'{GEMINI_URL}?key={GEMINI_API_KEY}',
+                GEMINI_URL,
+                headers={'x-goog-api-key': GEMINI_API_KEY},   # not in the URL, which ends up in logs
                 json=payload,
                 timeout=15,
             )
