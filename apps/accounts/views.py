@@ -1,6 +1,7 @@
 import os
 import time
 import concurrent.futures
+from collections import Counter
 import requests
 
 from django.contrib.auth import get_user_model
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from config.exceptions import client_ip, security_log
 from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
+from apps.progress.stages import growth_stages, stage_today
 
 User = get_user_model()
 
@@ -510,12 +512,15 @@ class AdminStatsView(APIView):
         ) or 0
         total_harvest_t = round(float(total_harvest_kg) / 1000, 2)
 
-        stage_dist = (
-            FarmCycle.objects
-            .filter(status='active', current_stage__isnull=False)
-            .values('current_stage__name')
-            .annotate(count=Count('id'))
+        # Stage for each crop's age, not the stage saved when the cycle started
+        stages = growth_stages()
+        stage_counts = Counter(
+            stage.name for stage in (
+                stage_today(c, stages)
+                for c in FarmCycle.objects.filter(status='active').select_related('farm', 'current_stage')
+            ) if stage
         )
+        stage_dist = [{'current_stage__name': name, 'count': n} for name, n in stage_counts.items()]
 
         # ── Farms grouped by ecosystem (for the donut chart) ───────────
         farms_by_ecosystem = list(
@@ -530,7 +535,6 @@ class AdminStatsView(APIView):
         # active farms by their GPS coordinates (rounded to ~1 km) and
         # return the representative lat/lng — the admin dashboard will
         # reverse-geocode it via Nominatim to get the real address.
-        from collections import Counter
         buckets = Counter()
         bucket_to_farms = {}
         for f in Farm.objects.filter(

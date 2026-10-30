@@ -145,3 +145,50 @@ class LogSeverityTests(TestCase):
                                                 'issue_type': 'pest', 'severity': 'medium'}, format='json')
         self.assertEqual(r.status_code, 201)
         self.assertEqual(ProgressLog.objects.get(pk=r.json()['id']).severity, 'medium')
+
+
+class StageTodayTests(TestCase):
+    """A crop's stage follows its age; the stage saved when the cycle started never moved on."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.varieties.models import GrowthStage
+        for no, name, paddy, upland in [(1, 'Germination & Seedling', 0, 0), (3, 'Tillering', 21, 14),
+                                        (5, 'Booting', 60, 55), (10, 'Post-Harvest', 125, 120)]:
+            GrowthStage.objects.create(stage_no=no, bbch_min=0, bbch_max=9, name=name, days_min_paddy=paddy,
+                                       days_max_paddy=paddy + 10, days_min_upland=upland,
+                                       days_max_upland=upland + 10, what_to_do='-', water_management='-')
+        cls.first = GrowthStage.objects.get(stage_no=1)
+        cls.admin = User.objects.create_user(username='agri', password='pass12345', is_staff=True)
+        cls.farm = make_farm(cls.admin)
+
+    def cycle(self, days_ago, status='active', ecosystem=None):
+        from datetime import timedelta
+        from django.utils import timezone
+        if ecosystem:
+            self.farm.ecosystem = ecosystem
+            self.farm.save()
+        return FarmCycle.objects.create(farm=self.farm, season='wet', year=2026, status=status,
+                                        current_stage=self.first,
+                                        planting_date=timezone.localdate() - timedelta(days=days_ago))
+
+    def test_the_stage_follows_the_crops_age(self):
+        from .stages import stage_today
+        self.assertEqual(stage_today(self.cycle(0)).name, 'Germination & Seedling')
+        self.assertEqual(stage_today(self.cycle(30)).name, 'Tillering')
+        self.assertEqual(stage_today(self.cycle(151)).name, 'Post-Harvest')
+
+    def test_upland_uses_its_own_day_ranges(self):
+        from .stages import stage_today
+        self.assertEqual(stage_today(self.cycle(57, ecosystem='upland')).name, 'Booting')
+
+    def test_a_finished_cycle_keeps_its_saved_stage(self):
+        from .stages import stage_today
+        self.assertEqual(stage_today(self.cycle(90, status='completed')), self.first)
+
+    def test_the_admin_cycle_list_shows_the_stage_for_today(self):
+        self.cycle(65)
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        row = client.get('/api/progress/admin/cycles/').data[0]
+        self.assertEqual((row['current_stage'], row['stage_no']), ('Booting', 5))
