@@ -97,6 +97,23 @@ def _guide_response(guide, source):
     }
 
 
+def _chosen_result(rec, variety_pk):
+    """The recommendation result the guide is for: the variety the farmer picked
+    ("Use this instead"). When none is sent, the variety of the farm's latest guide
+    from these results (an earlier pick), else the top-ranked one. None when the
+    picked variety is not one of this recommendation's results."""
+    results = rec.results.select_related('variety').order_by('rank')
+    if variety_pk in (None, ''):
+        latest = (PlantingGuide.objects
+                  .filter(farm=rec.farm, variety__in=results.values('variety'))
+                  .order_by('-created_at').first())
+        return (results.filter(variety=latest.variety_id).first() if latest else None) or results.first()
+    try:
+        return results.filter(variety_id=int(variety_pk)).first()
+    except (TypeError, ValueError):
+        return None
+
+
 # ── Open-Meteo 7-day forecast for the farm's coords ────────────────────────────
 def _get_forecast(lat, lng):
     """Fetch next 7 days of daily rainfall + temp range from Open-Meteo (free, no key)."""
@@ -239,7 +256,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
     try:
         resp = requests.post(f'{GEMINI_URL}?key={GEMINI_API_KEY}', json=payload, timeout=25)
         if resp.status_code != 200:
-            print(f'[PLANTING GUIDE/append] ✗ Gemini non-200: {resp.text[:400]}', flush=True)
+            print(f'[PLANTING GUIDE/append] FAIL Gemini non-200: {resp.text[:400]}', flush=True)
             return None
         body = resp.json()
         text = (body.get('candidates') or [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
@@ -286,7 +303,7 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
             'category':          cat,
         }
     except Exception as e:
-        print(f'[PLANTING GUIDE/append] ✗ {type(e).__name__}: {e}', flush=True)
+        print(f'[PLANTING GUIDE/append] FAIL {type(e).__name__}: {e}', flush=True)
         return None
 
 
@@ -294,9 +311,9 @@ def _generate_one_step(variety, scan, logs, forecast, language, category, last_d
 def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day=0):
     """Ask Gemini for a personalized planting guide that adapts to the farmer's logs + weather."""
     if not GEMINI_API_KEY:
-        print('[PLANTING GUIDE] ✗ GEMINI_API_KEY not set in environment — cannot call Gemini', flush=True)
+        print('[PLANTING GUIDE] FAIL GEMINI_API_KEY not set in environment - cannot call Gemini', flush=True)
         return []
-    print(f'[PLANTING GUIDE] ✓ GEMINI_API_KEY present (len={len(GEMINI_API_KEY)}, starts with {GEMINI_API_KEY[:6]}...)', flush=True)
+    print(f'[PLANTING GUIDE] OK GEMINI_API_KEY present (len={len(GEMINI_API_KEY)}, starts with {GEMINI_API_KEY[:6]}...)', flush=True)
 
     field = (
         f"soil texture: {getattr(scan, 'soil_texture', '') or 'clay loam'}, "
@@ -374,29 +391,29 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day
 
     resp = None
     try:
-        print(f'[PLANTING GUIDE] → POST {GEMINI_URL} (prompt={len(prompt)} chars, logs={len(logs)}, forecast_days={len(forecast)})', flush=True)
+        print(f'[PLANTING GUIDE] -> POST {GEMINI_URL} (prompt={len(prompt)} chars, logs={len(logs)}, forecast_days={len(forecast)})', flush=True)
         resp = requests.post(f'{GEMINI_URL}?key={GEMINI_API_KEY}', json=payload, timeout=40)
-        print(f'[PLANTING GUIDE] ← Gemini HTTP {resp.status_code} (body size: {len(resp.text)} bytes)', flush=True)
+        print(f'[PLANTING GUIDE] <- Gemini HTTP {resp.status_code} (body size: {len(resp.text)} bytes)', flush=True)
 
         if resp.status_code != 200:
             # Show the actual error body so we can diagnose 400/401/429/500 fast
-            print(f'[PLANTING GUIDE] ✗ Gemini non-200 body: {resp.text[:800]}', flush=True)
+            print(f'[PLANTING GUIDE] FAIL Gemini non-200 body: {resp.text[:800]}', flush=True)
             return []
 
         body = resp.json()
         candidates = body.get('candidates') or []
         if not candidates:
-            print(f'[PLANTING GUIDE] ✗ No candidates in Gemini response: {json.dumps(body)[:600]}', flush=True)
+            print(f'[PLANTING GUIDE] FAIL No candidates in Gemini response: {json.dumps(body)[:600]}', flush=True)
             return []
 
         # Gemini sometimes returns a finishReason like "MAX_TOKENS" or "SAFETY"
         finish = candidates[0].get('finishReason')
         if finish and finish not in ('STOP', 'MAX_TOKENS'):
-            print(f'[PLANTING GUIDE] ✗ Gemini finishReason={finish}', flush=True)
+            print(f'[PLANTING GUIDE] FAIL Gemini finishReason={finish}', flush=True)
 
         parts = candidates[0].get('content', {}).get('parts') or []
         if not parts:
-            print(f'[PLANTING GUIDE] ✗ No content parts in candidate: {json.dumps(candidates[0])[:400]}', flush=True)
+            print(f'[PLANTING GUIDE] FAIL No content parts in candidate: {json.dumps(candidates[0])[:400]}', flush=True)
             return []
         text = parts[0].get('text', '')
 
@@ -427,14 +444,14 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day
                         parsed = json.loads(m.group(0))
                         print('[PLANTING GUIDE] · parsed after regex extraction', flush=True)
                     except json.JSONDecodeError as je2:
-                        print(f'[PLANTING GUIDE] ✗ All JSON parse attempts failed: {je2}. Text preview: {text[:400]}', flush=True)
+                        print(f'[PLANTING GUIDE] FAIL All JSON parse attempts failed: {je2}. Text preview: {text[:400]}', flush=True)
                         return []
                 else:
-                    print(f'[PLANTING GUIDE] ✗ No JSON object found in response. Text preview: {text[:400]}', flush=True)
+                    print(f'[PLANTING GUIDE] FAIL No JSON object found in response. Text preview: {text[:400]}', flush=True)
                     return []
 
         raw_steps = parsed.get('steps', [])
-        print(f'[PLANTING GUIDE] ✓ Gemini returned {len(raw_steps)} raw steps', flush=True)
+        print(f'[PLANTING GUIDE] OK Gemini returned {len(raw_steps)} raw steps', flush=True)
 
         out, rejected = [], 0
         for i, st in enumerate(raw_steps, start=1):
@@ -451,18 +468,18 @@ def _generate_ai_steps(variety, scan, logs, forecast, language='en', current_day
                 'category':          st['category'],
             })
 
-        print(f'[PLANTING GUIDE] ✓ Accepted {len(out)} steps (rejected {rejected})', flush=True)
+        print(f'[PLANTING GUIDE] OK Accepted {len(out)} steps (rejected {rejected})', flush=True)
         return _fit_to_season(out, variety)
 
     except requests.Timeout:
-        print('[PLANTING GUIDE] ✗ Gemini timeout (>40s)', flush=True)
+        print('[PLANTING GUIDE] FAIL Gemini timeout (>40s)', flush=True)
         return []
     except requests.ConnectionError as ce:
-        print(f'[PLANTING GUIDE] ✗ Network error reaching Gemini: {ce}', flush=True)
+        print(f'[PLANTING GUIDE] FAIL Network error reaching Gemini: {ce}', flush=True)
         return []
     except Exception as e:
         import traceback
-        print(f'[PLANTING GUIDE] ✗ Unexpected error: {type(e).__name__}: {e}', flush=True)
+        print(f'[PLANTING GUIDE] FAIL Unexpected error: {type(e).__name__}: {e}', flush=True)
         print(traceback.format_exc(), flush=True)
         if resp is not None:
             print(f'[PLANTING GUIDE] Last response: {resp.text[:400]}', flush=True)
@@ -580,11 +597,13 @@ class GeneratePlantingGuideView(APIView):
         except Recommendation.DoesNotExist:
             return Response({'detail': 'Recommendation not found.'}, status=404)
 
-        top_result = rec.results.order_by('rank').first()
-        if not top_result:
+        if not rec.results.exists():
             return Response({'detail': 'No recommendation results found.'}, status=400)
+        chosen = _chosen_result(rec, request.data.get('variety'))
+        if not chosen:
+            return Response({'detail': 'variety must be one of this recommendation\'s varieties.'}, status=400)
 
-        variety = top_result.variety
+        variety = chosen.variety
         farm    = rec.farm
         season  = request.data.get('season', 'Wet Season')
         language = (request.data.get('language') or 'en').lower()
@@ -605,7 +624,7 @@ class GeneratePlantingGuideView(APIView):
             defaults={'start_date': timezone.now().date(), 'language': language},
         )
         if not force and guide.language == language and guide.steps.exists():
-            print(f'[PLANTING GUIDE] ⚡ SAVED steps for guide={guide.id} — skipping Gemini call', flush=True)
+            print(f'[PLANTING GUIDE] SAVED steps for guide={guide.id} - skipping Gemini call', flush=True)
             return Response(_guide_response(guide, source='SAVED'), status=status.HTTP_200_OK)
 
         # Latest environmental scan for this farm (soil + weather + flood)
@@ -628,7 +647,7 @@ class GeneratePlantingGuideView(APIView):
         if not steps:
             steps = _fallback_steps(language, variety.maturity_days)
             source = 'FALLBACK'
-            print(f'[PLANTING GUIDE] Gemini returned 0 steps — falling back to template ({language})', flush=True)
+            print(f'[PLANTING GUIDE] Gemini returned 0 steps - falling back to template ({language})', flush=True)
 
         print(f'[PLANTING GUIDE] source={source} | steps={len(steps)}', flush=True)
 
@@ -686,6 +705,7 @@ class AppendGuideStepView(APIView):
         "category":           "fertilizer",        # required, one of GUIDE_CATEGORIES
         "last_day":           20,                  # required, daysAfterPlanting of just-finished step
         "existing_count":     8,                   # current length of latestGuide.steps
+        "variety":            12,                  # optional, the guide's variety (default: earlier pick, else top-ranked)
         "season":             "Wet Season",
         "language":           "en" | "fil" | "ceb",
         "logs":               [ ... recent farmer logs ... ]
@@ -701,9 +721,11 @@ class AppendGuideStepView(APIView):
         except Recommendation.DoesNotExist:
             return Response({'detail': 'Recommendation not found.'}, status=404)
 
-        top_result = rec.results.order_by('rank').first()
-        if not top_result:
+        if not rec.results.exists():
             return Response({'detail': 'No recommendation results found.'}, status=400)
+        chosen = _chosen_result(rec, request.data.get('variety'))
+        if not chosen:
+            return Response({'detail': 'variety must be one of this recommendation\'s varieties.'}, status=400)
 
         category       = request.data.get('category')
         if category not in GUIDE_CATEGORIES:
@@ -720,7 +742,7 @@ class AppendGuideStepView(APIView):
             language = 'en'
         logs           = request.data.get('logs') or []
 
-        variety = top_result.variety
+        variety = chosen.variety
         farm    = rec.farm
         season  = request.data.get('season', 'Wet Season')
         scan    = farm.environmental_scans.order_by('-id').first() if hasattr(farm, 'environmental_scans') else None
