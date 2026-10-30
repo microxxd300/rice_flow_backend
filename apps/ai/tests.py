@@ -96,10 +96,17 @@ class AIChatGuardrailTests(TestCase):
         self.assertNotIn('googleapis', str(res.data))
 
     @patch.object(views.requests, 'post', return_value=gemini_reply('', status_code=500))
-    def test_other_errors_hide_the_details(self, _post, _weather):
+    def test_when_every_model_fails_the_error_hides_the_details(self, post, _weather):
+        res = self.chat('Hello')
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(post.call_count, len(views.GEMINI_MODELS))
+        self.assertNotIn('googleapis', str(res.data))
+
+    @patch.object(views.requests, 'post', side_effect=ValueError('bad JSON from Gemini'))
+    def test_unexpected_errors_hide_the_details(self, _post, _weather):
         res = self.chat('Hello')
         self.assertEqual(res.status_code, 500)
-        self.assertNotIn('googleapis', str(res.data))
+        self.assertNotIn('bad JSON', str(res.data))
 
     def test_a_blocked_reply_becomes_the_refusal(self, _weather):
         blocked = MagicMock(status_code=200)
@@ -126,7 +133,8 @@ class AIChatFarmerDataTests(TestCase):
                                              avg_yield_t_ha=5.2, max_yield_t_ha=8.0)
         EnvironmentalScan.objects.create(farm=self.farm, soil_texture='Clay', soil_ph=6.2, flood_risk='Low')
         cycle = FarmCycle.objects.create(farm=self.farm, variety=variety, season='wet', year=2026,
-                                         planting_date=timezone.localdate() - timedelta(days=28))
+                                         planting_date=timezone.localdate() - timedelta(days=28),
+                                         expected_harvest_date=timezone.localdate() + timedelta(days=86))
         ProgressLog.objects.create(farm_cycle=cycle, log_date=timezone.localdate(), issue_type='pest',
                                    severity='medium', observation='Stem borer deadhearts on the east side')
 
@@ -141,7 +149,8 @@ class AIChatFarmerDataTests(TestCase):
         self.chat('How much fertilizer now?')
         prompt = self.system_prompt(post)
         for fact in ('1.50 ha', 'barangay Nanyo', 'Clay soil', 'pH 6.2', 'Tubigan 18 (NSIC Rc222)',
-                     'day 28 after sowing', 'Pest (medium) - Stem borer deadhearts', '31.5 mm rain'):
+                     'day 28 after sowing', '(in about 86 days)', 'Pest (medium) - Stem borer deadhearts',
+                     '31.5 mm rain'):
             self.assertIn(fact, prompt)
         self.assertNotIn('Santos', prompt)   # no names go to Gemini
 
@@ -160,7 +169,34 @@ class AIChatFarmerDataTests(TestCase):
             res = self.chat('Hello')
         self.assertEqual(res.data['reply'], 'From the backup model.')
         self.assertEqual([c.args[0] for c in post.call_args_list],
-                         [views.GEMINI_URL.format(m) for m in views.GEMINI_MODELS])
+                         [views.GEMINI_URL.format(m) for m in views.GEMINI_MODELS[:2]])
+
+    def test_a_slow_or_rejecting_model_hands_over_too(self, _weather):
+        replies = [requests.exceptions.Timeout(), gemini_reply('', status_code=400), gemini_reply('Third model.')]
+        with patch.object(views.requests, 'post', side_effect=replies):
+            self.assertEqual(self.chat('Hello').data['reply'], 'Third model.')
+
+    @patch.object(views.requests, 'post', side_effect=requests.exceptions.Timeout())
+    def test_when_every_model_times_out_the_farmer_is_told(self, _post, _weather):
+        self.assertEqual(self.chat('Hello').status_code, 504)
+
+    @patch.object(views.requests, 'post', return_value=gemini_reply('OK.'))
+    def test_each_model_gets_the_thinking_setting_it_accepts(self, post, _weather):
+        with patch.object(views, 'GEMINI_MODELS', ('gemini-3.5-flash',)):
+            self.chat('Hello')
+        self.assertEqual(post.call_args.kwargs['json']['generationConfig']['thinkingConfig'],
+                         {'thinkingLevel': 'minimal'})
+        with patch.object(views, 'GEMINI_MODELS', ('gemini-2.5-flash',)):
+            self.chat('Hello again')
+        self.assertEqual(post.call_args.kwargs['json']['generationConfig']['thinkingConfig'],
+                         {'thinkingBudget': 0})
+
+    def test_thought_parts_are_not_shown_to_the_farmer(self, _weather):
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {'candidates': [{'content': {'parts': [
+            {'text': 'Planning the answer...', 'thought': True}, {'text': 'Apply urea now.'}]}}]}
+        with patch.object(views.requests, 'post', return_value=resp):
+            self.assertEqual(self.chat('Fertilizer?').data['reply'], 'Apply urea now.')
 
     @override_settings(AI_CHAT_DAILY_LIMIT=2)
     def test_each_farmer_gets_a_daily_limit_and_busy_replies_do_not_count(self, _weather):

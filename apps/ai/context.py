@@ -66,7 +66,9 @@ def farmer_context(user, farm_id=None) -> str:
             lines.append(f'Sowing is planned for {cycle.planting_date:%B %d}.')
         else:
             stage = f', stage: {cycle.current_stage.name}' if cycle.current_stage else ''
-            harvest = (f', expected harvest {cycle.expected_harvest_date:%B %d}'
+            # Worked out here, not left to the model's arithmetic
+            harvest = (f', expected harvest {cycle.expected_harvest_date:%B %d} '
+                       f'(in about {max(0, (cycle.expected_harvest_date - today).days)} days)'
                        if cycle.expected_harvest_date else '')
             lines.append(f'Current crop: sown {cycle.planting_date:%B %d}, day {day} after sowing{stage}{harvest}.')
     else:

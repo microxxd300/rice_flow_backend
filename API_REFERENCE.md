@@ -790,17 +790,31 @@ Content-Type: application/json
 {
   "message":  "How much fertilizer should I apply?",
   "history":  [],
-  "language": "en"
+  "language": "en",
+  "farm":     12
 }
 ```
+
+`farm` is optional: the farm selected in the app. The answer uses that farm's scan, chosen
+variety, crop day, field logs, next guide steps and weather. Another user's farm is ignored
+(the newest of your own farms is used). `message` is at most 1000 characters.
 
 **Response:**
 ```json
 {
-  "reply":    "For your variety, apply 14-14-14 fertilizer at 5 bags per hectare...",
+  "reply":    "Your Tubigan 18 is on day 28 (tillering), so apply about 1.5 bags of urea per hectare...",
   "language": "en"
 }
 ```
+
+| Status | When |
+|---|---|
+| `400` | `message` is empty or longer than 1000 characters |
+| `429` | the farmer reached `AI_CHAT_DAILY_LIMIT` answers today (default 15) |
+| `503` | every Gemini model is out of free quota or busy; try again later |
+| `504` | Gemini did not answer in time |
+
+The same first question within 6 hours returns the saved answer and does not count toward the limit.
 
 ---
 
