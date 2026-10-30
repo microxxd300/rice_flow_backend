@@ -168,7 +168,7 @@ REST_FRAMEWORK = {
         'user': '3000/hour',
         'login': '10/min',      # per IP: slows password guessing
         'register': '10/hour',  # per IP: stops mass sign-ups
-        'ai_chat': '60/hour',   # per user: caps Gemini usage
+        'ai_chat': '60/hour',   # per user: burst cap; AI_CHAT_DAILY_LIMIT caps answers a day
     },
     # Proxies in front of Django (nginx, Render, ngrok) so throttles use the real client IP
     # from X-Forwarded-For instead of a value the client could fake
@@ -176,6 +176,10 @@ REST_FRAMEWORK = {
     # Logs 403s/429s and turns unexpected errors into a JSON 500 without a stack trace
     'EXCEPTION_HANDLER': 'config.exceptions.exception_handler',
 }
+
+# AI chat answers per farmer per day. The Gemini free tier is one shared pool for the whole
+# app, so one farmer can't use it all up. Saved (reused) answers don't count.
+AI_CHAT_DAILY_LIMIT = int(os.getenv('AI_CHAT_DAILY_LIMIT', '15'))
 
 # JWT
 SIMPLE_JWT = {
