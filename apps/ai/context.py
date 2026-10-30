@@ -9,6 +9,7 @@ from apps.environmental.services.openmeteo import get_current_weather
 from apps.farms.models import Farm
 from apps.guides.models import PlantingGuide
 from apps.progress.models import ProgressLog
+from apps.progress.stages import stage_today
 
 MAX_NOTE_CHARS = 120
 
@@ -65,7 +66,8 @@ def farmer_context(user, farm_id=None) -> str:
         if day < 0:
             lines.append(f'Sowing is planned for {cycle.planting_date:%B %d}.')
         else:
-            stage = f', stage: {cycle.current_stage.name}' if cycle.current_stage else ''
+            today_stage = stage_today(cycle)
+            stage = f', stage: {today_stage.name}' if today_stage else ''
             # Worked out here, not left to the model's arithmetic
             harvest = (f', expected harvest {cycle.expected_harvest_date:%B %d} '
                        f'(in about {max(0, (cycle.expected_harvest_date - today).days)} days)'

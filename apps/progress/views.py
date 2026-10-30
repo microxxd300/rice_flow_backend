@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
+from .stages import growth_stages, stage_today
 
 
 def _clean_full_name(u):
@@ -40,9 +41,11 @@ class AdminFarmCycleListView(APIView):
         if owner_id:
             cycles = cycles.filter(farm__user_id=owner_id)
 
+        stages = growth_stages()
         data = []
         for c in cycles:
             yr   = getattr(c, 'yield_record', None)
+            stage = stage_today(c, stages)
             farm = c.farm
             user = farm.user
             data.append({
@@ -65,8 +68,8 @@ class AdminFarmCycleListView(APIView):
                 'planting_date':         c.planting_date.isoformat()         if c.planting_date         else None,
                 'expected_harvest_date': c.expected_harvest_date.isoformat() if c.expected_harvest_date else None,
                 'actual_harvest_date':   c.actual_harvest_date.isoformat()   if c.actual_harvest_date   else None,
-                'current_stage':         c.current_stage.name if c.current_stage else None,
-                'stage_no':              c.current_stage.stage_no if c.current_stage else None,
+                'current_stage':         stage.name if stage else None,
+                'stage_no':              stage.stage_no if stage else None,
                 'status':                c.status,
                 'yield_t_ha':            yr.yield_per_ha if yr else None,
                 'created_at':            c.created_at.isoformat(),
