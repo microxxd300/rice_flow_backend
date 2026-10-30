@@ -1,6 +1,7 @@
 import hashlib
 import os
 import re
+import time
 import requests
 from django.conf import settings
 from django.core.cache import cache
@@ -16,9 +17,12 @@ from .context import farmer_context
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent'
-# Free tier: each model has its own daily request pool, so when one runs out the next
-# answers. Lite first: its pool is the largest.
-GEMINI_MODELS = ('gemini-2.5-flash-lite', 'gemini-2.5-flash')
+# Free tier: each model has its own small daily pool (20 requests), so when one runs
+# out, is overloaded or is slow, the next answers. Each was checked on farm answers,
+# made-up varieties, the app guide, prompt attacks and Bisaya before it was added.
+# gemini-2.5-flash-lite is left out: the planting guide uses its pool.
+GEMINI_MODELS = ('gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash')
+GEMINI_DEADLINE_SECONDS = 25   # all tries together; the app waits 30
 
 REPLY_REUSE_SECONDS = 6 * 60 * 60   # the same first question again gets the saved answer
 
@@ -136,7 +140,9 @@ STRICT RULES:
    rice farming or the app, respond ONLY with:
    "{refusal}"
 2. For variety-specific facts, use ONLY the dataset above. Never invent variety
-   names, yields, or tolerances that are not listed.
+   names, yields, or tolerances that are not listed. If the farmer asks about a
+   variety that is not in the dataset, say it is not in RiceFlow's list (do not
+   describe it) and suggest listed varieties that fit their farm.
 3. Give general rice agronomy advice that is standard for the Philippines; if you
    are unsure of an exact number, give a safe typical range and advise confirming
    with the local DA or PhilRice office.
@@ -192,22 +198,42 @@ def _clean_history(history, protected: set) -> list:
     return turns
 
 
+def _thinking_config(model: str) -> dict:
+    # Gemini 3 takes a thinking level and rejects a budget (400). Minimal keeps the
+    # reply fast and stops thinking from eating the output tokens.
+    return {'thinkingLevel': 'minimal'} if model.startswith('gemini-3') else {'thinkingBudget': 0}
+
+
 def _ask_gemini(payload):
-    """Gemini's response, from the first model that has room: a model whose free pool
-    is used up (429) or that is overloaded (503) hands over to the next. None when all
-    of them are busy."""
+    """Gemini's response, from the first model that answers: one that is out of quota,
+    overloaded, failing, rejects the request or is too slow hands over to the next.
+    None when none answered in time. Raises Timeout when every try timed out."""
+    deadline = time.monotonic() + GEMINI_DEADLINE_SECONDS
+    timed_out = False
     for model in GEMINI_MODELS:
-        resp = requests.post(
-            GEMINI_URL.format(model),
-            headers={'x-goog-api-key': GEMINI_API_KEY},   # not in the URL, which ends up in logs
-            json=payload,
-            timeout=15,
-        )
-        if resp.status_code in (429, 503):
-            print(f'[AI CHAT] {model} busy ({resp.status_code}), trying the next model', flush=True)
+        left = deadline - time.monotonic()
+        if left < 3:
+            break
+        body = {**payload, 'generationConfig': {**payload['generationConfig'],
+                                                'thinkingConfig': _thinking_config(model)}}
+        try:
+            resp = requests.post(
+                GEMINI_URL.format(model),
+                headers={'x-goog-api-key': GEMINI_API_KEY},   # not in the URL, which ends up in logs
+                json=body,
+                timeout=min(15, left),
+            )
+        except requests.exceptions.Timeout:
+            print(f'[AI CHAT] {model} timed out, trying the next model', flush=True)
+            timed_out = True
             continue
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            print(f'[AI CHAT] {model} answered {resp.status_code}, trying the next model', flush=True)
+            continue
+        print(f'[AI CHAT] answered by {model}', flush=True)
         return resp.json()
+    if timed_out:
+        raise requests.exceptions.Timeout('every model timed out')
     return None
 
 
@@ -301,8 +327,7 @@ class AIChatView(APIView):
             'contents': contents,
             'generationConfig': {
                 'temperature':      0.3,
-                'maxOutputTokens':  600,
-                'thinkingConfig':   {'thinkingBudget': 0},
+                'maxOutputTokens':  1024,   # 3-5 sentences; room so a reply is never cut
             },
         }
 
@@ -315,9 +340,11 @@ class AIChatView(APIView):
                 )
             parts = ((data.get('candidates') or [{}])[0].get('content') or {}).get('parts') or []
             # No text means Gemini blocked the reply (safety filter): answer like any off-topic request
-            reply = (parts[0].get('text') or '').strip() if parts else ''
-            if not reply or _quotes_instructions(reply, protected):
-                reply = refusal
+            reply = ''.join(p.get('text') or '' for p in parts if not p.get('thought')).strip()
+            if reply and _quotes_instructions(reply, protected):
+                print('[AI CHAT] reply withheld: it quoted the instructions', flush=True)
+                reply = ''
+            reply = reply or refusal
             _count_question(count_key)
             if reuse_key:
                 _cache_set(reuse_key, reply, REPLY_REUSE_SECONDS)
