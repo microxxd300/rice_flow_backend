@@ -816,6 +816,34 @@ variety, crop day, field logs, next guide steps and weather. Another user's farm
 
 The same first question within 6 hours returns the saved answer and does not count toward the limit.
 
+### AI knowledge sheet (admins only)
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/ai/knowledge/
+PUT https://doing-haven-requisite.ngrok-free.dev/api/ai/knowledge/
+Authorization: Bearer <ADMIN_TOKEN>
+ngrok-skip-browser-warning: true
+Content-Type: application/json
+
+{
+  "content": "Topdress urea at early tillering, about 21 days after transplanting. (Source: PhilRice PalayCheck)"
+}
+```
+
+The rice-farming reference the AI chat answers from, written by agriculturists from PhilRice
+and DA sources (each part names its source). It goes into every chat, so it is capped at
+`max_chars` (20,000, about 10 pages). Empty means the chat uses general knowledge. Farmers
+get `403`. Also editable in Django admin under **AI knowledge sheet**.
+
+**Response:**
+```json
+{
+  "content":         "Topdress urea at early tillering ... (Source: PhilRice PalayCheck)",
+  "updated_at":      "2026-10-30T15:20:00+08:00",
+  "updated_by_name": "agri@georice.app",
+  "max_chars":       20000
+}
+```
+
 ---
 
 ## 📊 Yield Prediction (Linear Regression) — `apps/predictions/`

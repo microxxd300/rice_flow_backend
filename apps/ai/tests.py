@@ -15,6 +15,7 @@ from apps.progress.models import FarmCycle, ProgressLog
 from apps.varieties.models import RiceVariety
 
 from . import views
+from .models import MAX_KNOWLEDGE_CHARS, KnowledgeSheet
 
 WEATHER = {'weekly_rainfall_mm': 31.5, 'avg_temperature': 27.4}
 
@@ -219,3 +220,50 @@ class AIChatFarmerDataTests(TestCase):
         self.chat('How do I control pests?', history=[{'role': 'user', 'text': 'Hi'},
                                                       {'role': 'model', 'text': 'Hello!'}])
         self.assertEqual(post.call_count, 2)
+
+
+@patch('apps.ai.context.get_current_weather', return_value=WEATHER)
+@patch.object(views, 'GEMINI_API_KEY', 'test-key')
+class KnowledgeSheetTests(TestCase):
+    """Agriculturists keep a sourced reference the chat answers from; only admins edit it."""
+
+    def setUp(self):
+        cache.clear()
+        self.farmer = User.objects.create_user(username='grower', password='pass12345')
+        self.admin = User.objects.create_user(username='agri', password='pass12345', is_staff=True)
+        self.client = APIClient()
+        self.url = reverse('ai-knowledge')
+
+    def system_prompt_for(self, message):
+        self.client.force_authenticate(self.farmer)
+        with patch.object(views.requests, 'post', return_value=gemini_reply('OK.')) as post:
+            self.client.post(reverse('ai-chat'), {'message': message, 'language': 'en'}, format='json')
+        return post.call_args.kwargs['json']['systemInstruction']['parts'][0]['text']
+
+    def test_the_sheet_goes_into_the_prompt_with_its_source(self, _weather):
+        KnowledgeSheet.objects.create(content='Topdress urea at early tillering. (Source: PhilRice PalayCheck)')
+        prompt = self.system_prompt_for('When do I topdress?')
+        self.assertIn('RICE FARMING KNOWLEDGE', prompt)
+        self.assertIn('Topdress urea at early tillering. (Source: PhilRice PalayCheck)', prompt)
+
+    def test_an_empty_sheet_leaves_the_prompt_as_before(self, _weather):
+        self.assertNotIn('RICE FARMING KNOWLEDGE', self.system_prompt_for('Hello'))
+
+    def test_an_admin_can_read_and_replace_the_sheet(self, _weather):
+        self.client.force_authenticate(self.admin)
+        res = self.client.put(self.url, {'content': 'Drain 10-14 days before harvest.'}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['updated_by_name'], self.admin.email)
+        res = self.client.get(self.url)
+        self.assertEqual(res.data['content'], 'Drain 10-14 days before harvest.')
+        self.assertEqual(res.data['max_chars'], MAX_KNOWLEDGE_CHARS)
+
+    def test_farmers_cannot_read_or_change_it(self, _weather):
+        self.client.force_authenticate(self.farmer)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(self.client.put(self.url, {'content': 'x'}, format='json').status_code, 403)
+
+    def test_a_sheet_over_the_size_limit_is_rejected(self, _weather):
+        self.client.force_authenticate(self.admin)
+        res = self.client.put(self.url, {'content': 'x' * (MAX_KNOWLEDGE_CHARS + 1)}, format='json')
+        self.assertEqual(res.status_code, 400)
