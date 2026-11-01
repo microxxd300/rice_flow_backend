@@ -38,3 +38,29 @@ class ProfileRoleTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual((self.user.email, self.user.username), ('f@x.com', 'farmer'))
         self.assertEqual(self.user.barangay, 'Nanyo')
+
+
+class AdminDeactivationTests(TestCase):
+    """A farmer the admin website deactivates is locked out of the app at once."""
+
+    def setUp(self):
+        from apps.accounts.models import User
+        self.admin = User.objects.create_user(username='agri', email='agri@georice.app', password='pass12345',
+                                              is_staff=True, is_superuser=True)
+        self.farmer = User.objects.create_user(username='juan', email='juan@georice.app', password='Palay-2026!')
+        self.app = APIClient()
+        r = self.app.post('/api/auth/login/', {'email': 'juan@georice.app', 'password': 'Palay-2026!'}, format='json')
+        self.app.credentials(HTTP_AUTHORIZATION=f"Bearer {r.json()['access_token']}")
+
+    def test_deactivated_farmer_loses_the_open_session_and_cannot_log_in(self):
+        self.assertEqual(self.app.get('/api/farms/').status_code, 200)
+
+        admin = APIClient()
+        admin.force_authenticate(self.admin)
+        r = admin.patch('/api/auth/users/', {'id': self.farmer.id, 'is_active': False}, format='json')
+        self.assertEqual(r.status_code, 200)
+
+        self.assertEqual(self.app.get('/api/farms/').status_code, 401)   # the token in the app stops working
+        r = APIClient().post('/api/auth/login/', {'email': 'juan@georice.app', 'password': 'Palay-2026!'},
+                             format='json')
+        self.assertNotEqual(r.status_code, 200)
