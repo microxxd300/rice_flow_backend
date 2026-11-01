@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from apps.accounts.permissions import can_see_contacts
 from .location_check import MESSAGES, check_pin, in_panabo, location_flag
 from .models import Farm
 
@@ -54,7 +55,8 @@ class AdminFarmSerializer(serializers.ModelSerializer):
         return full or obj.user.username
 
     def get_owner_email(self, obj):
-        return obj.user.email
+        request = self.context.get('request')
+        return obj.user.email if request and can_see_contacts(request.user) else None
 
     def get_latest_flood_risk(self, obj):
         """Flood risk from the most recent environmental scan, if any.

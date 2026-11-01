@@ -71,3 +71,81 @@ class AdminDeactivationTests(TestCase):
         self.farmer.save()
         r = APIClient().post('/api/auth/login/', {'email': 'juan@georice.app', 'password': 'wrong-pass'}, format='json')
         self.assertEqual(r.json()['non_field_errors'], ['Invalid credentials.'])
+
+
+class ValidatorRoleTests(TestCase):
+    """The validator (is_staff) reads the admin data and corrects varieties; everything
+    that changes accounts, deletes records or changes the RSI model is admin (superuser) only."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.accounts.models import User
+        from apps.farms.models import Farm
+        from apps.progress.models import FarmCycle
+        from apps.varieties.models import RiceVariety
+        cls.admin = User.objects.create_user(username='dev', email='dev@georice.app', password='pass12345',
+                                             is_staff=True, is_superuser=True)
+        cls.validator = User.objects.create_user(username='engr', email='engr@georice.app', password='pass12345',
+                                                 is_staff=True)
+        cls.farmer = User.objects.create_user(username='juan', email='juan@georice.app', password='pass12345')
+        cls.farm = Farm.objects.create(user=cls.farmer, name='Juan farm', barangay='Gredu',
+                                       latitude=7.3, longitude=125.68, area_hectares=1)
+        cls.cycle = FarmCycle.objects.create(farm=cls.farm, season='wet', year=2026, planting_date='2026-06-01')
+        cls.variety = RiceVariety.objects.create(variety_id='T1', nsic_code='Rc222', common_name='Tubigan 18',
+                                                 ecosystem='irrigated_lowland', season='both', maturity_days=113,
+                                                 avg_yield_t_ha=5.2, max_yield_t_ha=8.0)
+
+    def as_user(self, user):
+        client = APIClient()
+        client.force_authenticate(user)
+        return client
+
+    def test_validator_reads_the_admin_pages(self):
+        v = self.as_user(self.validator)
+        for url in ('/api/auth/admin-stats/', '/api/farms/all/', '/api/progress/admin/cycles/',
+                    '/api/varieties/', '/api/recommendations/rules/', '/api/predictions/models/'):
+            self.assertEqual(v.get(url).status_code, 200, url)
+
+    def test_validator_cannot_do_admin_only_actions(self):
+        v = self.as_user(self.validator)
+        denied = [
+            ('get',    '/api/auth/users/'),
+            ('patch',  '/api/auth/users/'),
+            ('delete', f'/api/auth/users/{self.farmer.id}/'),
+            ('delete', f'/api/farms/admin/{self.farm.id}/'),
+            ('post',   '/api/farms/cleanup/'),
+            ('delete', f'/api/progress/admin/cycles/{self.cycle.id}/'),
+            ('post',   '/api/varieties/'),
+            ('delete', f'/api/varieties/{self.variety.id}/'),
+            ('post',   '/api/varieties/import-csv/'),
+            ('put',    '/api/recommendations/rules/'),
+            ('post',   '/api/recommendations/train/'),
+            ('post',   '/api/predictions/train/'),
+            ('get',    '/api/ai/knowledge/'),
+        ]
+        for method, url in denied:
+            self.assertEqual(getattr(v, method)(url, {}, format='json').status_code, 403, f'{method} {url}')
+        self.assertTrue(self.farm.__class__.objects.filter(pk=self.farm.pk).exists())
+        self.variety.refresh_from_db()
+        self.assertTrue(self.variety.is_active)
+
+    def test_validator_can_correct_a_variety_but_not_deactivate_it(self):
+        r = self.as_user(self.validator).patch(f'/api/varieties/{self.variety.id}/',
+                                               {'avg_yield_t_ha': 5.4, 'is_active': False}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.variety.refresh_from_db()
+        self.assertEqual(self.variety.avg_yield_t_ha, 5.4)
+        self.assertTrue(self.variety.is_active)
+
+    def test_farmer_emails_are_hidden_from_the_validator(self):
+        v, a = self.as_user(self.validator), self.as_user(self.admin)
+        self.assertIsNone(v.get('/api/farms/all/').json()[0]['owner_email'])
+        self.assertIsNone(v.get('/api/progress/admin/cycles/').json()[0]['owner_email'])
+        self.assertEqual(a.get('/api/farms/all/').json()[0]['owner_email'], 'juan@georice.app')
+        self.assertEqual(a.get('/api/progress/admin/cycles/').json()[0]['owner_email'], 'juan@georice.app')
+
+    def test_admin_keeps_full_access(self):
+        a = self.as_user(self.admin)
+        self.assertEqual(a.get('/api/auth/users/').status_code, 200)
+        self.assertEqual(a.delete(f'/api/progress/admin/cycles/{self.cycle.id}/').status_code, 200)
+        self.assertEqual(a.delete(f'/api/farms/admin/{self.farm.id}/').status_code, 204)

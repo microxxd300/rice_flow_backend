@@ -2,8 +2,9 @@ from datetime import date, timedelta
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from apps.accounts.permissions import IsSuperUser
 from apps.environmental.models import EnvironmentalScan
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
@@ -73,7 +74,7 @@ class SuitabilityRulesView(APIView):
     def get_permissions(self):
         if self.request.method == 'GET':
             return [IsAuthenticated()]
-        return [IsAdminUser()]
+        return [IsSuperUser()]
 
     def get(self, request):
         rs = SuitabilityRuleSet.objects.first()
@@ -170,7 +171,7 @@ class GenerateRecommendationView(APIView):
 
 
 class TrainModelsView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request):
         try:
@@ -182,7 +183,7 @@ class TrainModelsView(APIView):
 
 
 class SetActiveModelView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request, model_name):
         try:
