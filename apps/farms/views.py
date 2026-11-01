@@ -4,6 +4,7 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from apps.accounts.permissions import IsSuperUser
 from .location_check import check_pin
 from .models import Farm
 from .serializers import FarmSerializer, AdminFarmSerializer
@@ -94,7 +95,7 @@ class AdminFarmListView(generics.ListAPIView):
 
 class AdminFarmDeleteView(APIView):
     """DELETE /api/farms/admin/<pk>/ — admin hard-delete of any farm."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def delete(self, request, pk):
         try:
@@ -107,7 +108,7 @@ class AdminFarmDeleteView(APIView):
 
 class AdminFarmCleanupView(APIView):
     """POST /api/farms/cleanup/ — keep only the newest farm per user, delete the rest."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request):
         from django.contrib.auth import get_user_model

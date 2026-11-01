@@ -230,7 +230,8 @@ class KnowledgeSheetTests(TestCase):
     def setUp(self):
         cache.clear()
         self.farmer = User.objects.create_user(username='grower', password='pass12345')
-        self.admin = User.objects.create_user(username='agri', password='pass12345', is_staff=True)
+        self.admin = User.objects.create_user(username='agri', password='pass12345', is_staff=True,
+                                              is_superuser=True)
         self.client = APIClient()
         self.url = reverse('ai-knowledge')
 

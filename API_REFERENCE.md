@@ -522,6 +522,25 @@ ngrok-skip-browser-warning: true
 
 ---
 
+## 👥 Admin roles (admin website)
+
+Two staff roles, from the flags already on the user (no extra table):
+
+| Role | Flags | Can do |
+|---|---|---|
+| **Admin** (developers) | `is_staff` + `is_superuser` | Everything |
+| **Validator** (agriculturist engineer) | `is_staff` only | Read the dashboard, farms, cycles, varieties, rules and yield models; correct a variety (`PUT`/`PATCH /api/varieties/<id>/`; `is_active` is ignored, so only the admin deactivates) |
+
+Admin only (a validator gets `403`): `/api/auth/users/` (list, create, edit, delete),
+`DELETE /api/farms/admin/<id>/`, `POST /api/farms/cleanup/`, `DELETE /api/progress/admin/cycles/<id>/`,
+`POST /api/varieties/`, `DELETE /api/varieties/<id>/`, `POST /api/varieties/import-csv/`,
+`PUT /api/recommendations/rules/`, both `train/` endpoints, `set-model/`, and `/api/ai/knowledge/`.
+
+Farmer emails (`owner_email` in `/api/farms/all/` and `/api/progress/admin/cycles/`) are `null`
+for a validator: contact details are for the admin only (Data Privacy Act).
+
+---
+
 ## 🌾 Farms (`apps/farms/`)
 
 ### List all my farms
@@ -831,8 +850,8 @@ Content-Type: application/json
 
 The rice-farming reference the AI chat answers from, written by agriculturists from PhilRice
 and DA sources (each part names its source). It goes into every chat, so it is capped at
-`max_chars` (20,000, about 10 pages). Empty means the chat uses general knowledge. Farmers
-get `403`. Also editable in Django admin under **AI knowledge sheet**.
+`max_chars` (20,000, about 10 pages). Empty means the chat uses general knowledge. Admin role
+only: validators and farmers get `403`. Also editable in Django admin under **AI knowledge sheet**.
 
 **Response:**
 ```json

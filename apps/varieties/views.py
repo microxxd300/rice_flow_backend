@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
+from apps.accounts.permissions import IsSuperUser
 from .models import RiceVariety, GrowthStage, FertilizerSchedule, PestDisease
 from .serializers import (
     RiceVarietySerializer, GrowthStageSerializer,
@@ -17,11 +18,14 @@ from .serializers import (
 
 
 class _ReadAnyWriteAdmin:
-    """Allow any authenticated user to GET, require admin for write methods."""
+    """Any signed-in user reads; the validator may correct a variety (PUT/PATCH);
+    only the admin adds or deactivates one."""
     def get_permissions(self):
         if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
             return [IsAuthenticated()]
-        return [IsAdminUser()]
+        if self.request.method in ('PUT', 'PATCH'):
+            return [IsAdminUser()]
+        return [IsSuperUser()]
 
 
 class RiceVarietyListView(_ReadAnyWriteAdmin, ListCreateAPIView):
@@ -58,7 +62,7 @@ class VarietyImportCSVView(APIView):
         nsic_code; invalid rows are reported with their line number.
       - Response: { created, updated, skipped, errors }
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
     parser_classes     = [MultiPartParser]
 
     REQUIRED = ['nsic_code', 'common_name', 'ecosystem',
@@ -240,6 +244,12 @@ class RiceVarietyDetailView(_ReadAnyWriteAdmin, RetrieveUpdateDestroyAPIView):
     """
     serializer_class = RiceVarietySerializer
     queryset = RiceVariety.objects.all()
+
+    def perform_update(self, serializer):
+        # Deactivating is admin only, so a validator's edit keeps the variety's status
+        if not self.request.user.is_superuser:
+            serializer.validated_data.pop('is_active', None)
+        serializer.save()
 
     def perform_destroy(self, instance):
         # Soft delete to preserve referential integrity with historical

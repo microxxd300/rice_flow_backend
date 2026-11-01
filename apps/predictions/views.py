@@ -1,7 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from apps.accounts.permissions import IsSuperUser
 
 from apps.farms.models import Farm
 from apps.varieties.models import RiceVariety
@@ -22,7 +23,7 @@ class ModelComparisonView(APIView):
 
 class TrainModelsView(APIView):
     """POST /api/predictions/train/ — retrain all 3 models (admin only)."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request):
         results = train_all_models()

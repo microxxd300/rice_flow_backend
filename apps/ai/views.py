@@ -9,8 +9,9 @@ from django.db import DatabaseError
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from apps.accounts.permissions import IsSuperUser
 
 from apps.varieties.models import RiceVariety
 
@@ -281,7 +282,7 @@ class KnowledgeSheetView(APIView):
     PUT  /api/ai/knowledge/  -> replace it ({"content": "..."}), at most MAX_KNOWLEDGE_CHARS
     Admins only: farmers see it only through the chat's answers.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def get(self, request):
         data = KnowledgeSheetSerializer(KnowledgeSheet.current()).data

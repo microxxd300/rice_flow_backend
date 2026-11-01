@@ -11,6 +11,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from .permissions import IsSuperUser
 from config.exceptions import client_ip, security_log
 from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
 from apps.progress.stages import growth_stages, stage_today
@@ -75,7 +76,7 @@ def _clean_full_name(user):
 
 class AdminUserListView(APIView):
     """GET /api/auth/users/ — admin-only list of all users."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def get(self, request):
         from django.db.models import Prefetch, Count
@@ -121,7 +122,7 @@ class AdminUserDetailView(APIView):
     PATCH  /api/auth/users/<id>/ — update credentials, role, address
     DELETE /api/auth/users/<id>/ — soft delete (sets is_active=False)
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def get(self, request, pk):
         try:

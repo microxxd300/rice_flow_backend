@@ -3,6 +3,7 @@ from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIV
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from apps.accounts.permissions import IsSuperUser, can_see_contacts
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
 from .stages import growth_stages, stage_today
@@ -42,6 +43,7 @@ class AdminFarmCycleListView(APIView):
             cycles = cycles.filter(farm__user_id=owner_id)
 
         stages = growth_stages()
+        show_contacts = can_see_contacts(request.user)
         data = []
         for c in cycles:
             yr   = getattr(c, 'yield_record', None)
@@ -54,7 +56,7 @@ class AdminFarmCycleListView(APIView):
                 'farm_name':             farm.name,
                 'owner_id':              user.id,
                 'owner_name':            _clean_full_name(user),
-                'owner_email':           user.email,
+                'owner_email':           user.email if show_contacts else None,
                 'barangay':              farm.barangay or '',
                 'latitude':              float(farm.latitude),
                 'longitude':             float(farm.longitude),
@@ -78,7 +80,7 @@ class AdminFarmCycleListView(APIView):
 
 
 class AdminFarmCycleDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def delete(self, request, pk):
         try:
