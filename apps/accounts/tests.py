@@ -63,4 +63,11 @@ class AdminDeactivationTests(TestCase):
         self.assertEqual(self.app.get('/api/farms/').status_code, 401)   # the token in the app stops working
         r = APIClient().post('/api/auth/login/', {'email': 'juan@georice.app', 'password': 'Palay-2026!'},
                              format='json')
-        self.assertNotEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('account is disabled', r.json()['non_field_errors'][0])   # shown as-is by the app
+
+    def test_a_wrong_password_on_a_disabled_account_says_nothing_about_it(self):
+        self.farmer.is_active = False
+        self.farmer.save()
+        r = APIClient().post('/api/auth/login/', {'email': 'juan@georice.app', 'password': 'wrong-pass'}, format='json')
+        self.assertEqual(r.json()['non_field_errors'], ['Invalid credentials.'])
