@@ -11,6 +11,9 @@ class PlantingGuide(models.Model):
     # Language the saved steps were generated in — a request in a different
     # language triggers regeneration instead of returning mismatched text.
     language    = models.CharField(max_length=5, default='en')
+    # The checklist in each language it has been generated in ({"fil": [step, ...]}), so
+    # switching back to a language reuses it instead of asking Gemini again
+    translations = models.JSONField(default=dict, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

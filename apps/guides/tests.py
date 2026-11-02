@@ -14,6 +14,7 @@ from apps.recommendations.models import Recommendation
 from apps.varieties.models import RiceVariety
 
 from . import views
+from .models import GuideStep, PlantingGuide
 
 
 def make_variety(maturity_days=110, code='T14', name='Tubigan 14'):
@@ -129,3 +130,52 @@ class ChosenVarietyTests(TestCase):
         self.client.post(self.generate_url, {'variety': self.second.id}, format='json')
         cycle.refresh_from_db()
         self.assertEqual(cycle.variety, self.top)
+
+
+FIL_STEP = {'title': 'Pagsabog', 'instruction': 'Isabog ang binhi.', 'category': 'planting', 'daysAfterPlanting': 0}
+
+
+@patch.object(views, '_get_forecast', return_value=[])
+class GuideTranslationCacheTests(TestCase):
+    """A language the guide was already made in is reused, not asked of Gemini again."""
+
+    def setUp(self):
+        user = User.objects.create_user(username='grower', password='pass12345')
+        farm = Farm.objects.create(user=user, name='Farm', barangay='Nanyo', latitude=7.3, longitude=125.68,
+                                   area_hectares=1)
+        self.rec = Recommendation.objects.create(farm=farm, scan=EnvironmentalScan.objects.create(farm=farm))
+        self.rec.results.create(variety=make_variety(), rank=1, rsi_score=95, suitability_class='S1')
+        self.client = APIClient()
+        self.client.force_authenticate(user)
+        self.url = reverse('generate-guide', args=[self.rec.id])
+
+    def generate(self, language, **extra):
+        return self.client.post(self.url, {'language': language, **extra}, format='json').data
+
+    def test_switching_back_reuses_the_saved_language(self, _forecast):
+        with patch.object(views, '_generate_ai_steps', side_effect=[[AI_STEP], [FIL_STEP]]) as ai:
+            self.generate('en')
+            self.generate('fil')
+            back = self.generate('en')
+            again = self.generate('fil')
+        self.assertEqual(ai.call_count, 2)                     # en and fil once each
+        self.assertEqual((back['source'], back['steps'][0]['title']), ('CACHED', 'Sowing'))
+        self.assertEqual((again['source'], again['steps'][0]['title']), ('CACHED', 'Pagsabog'))
+
+    def test_check_offs_carry_over_to_the_saved_language(self, _forecast):
+        with patch.object(views, '_generate_ai_steps', side_effect=[[AI_STEP], [FIL_STEP]]):
+            self.generate('en')
+            fil = self.generate('fil')
+        GuideStep.objects.filter(pk=fil['steps'][0]['id']).update(is_completed=True)
+        back = self.generate('en')
+        self.assertTrue(back['steps'][0]['is_completed'])
+
+    def test_a_template_is_not_kept_and_a_new_plan_clears_the_cache(self, _forecast):
+        with patch.object(views, '_generate_ai_steps', side_effect=[[AI_STEP], [], [FIL_STEP], [AI_STEP]]) as ai:
+            self.generate('en')
+            self.assertEqual(self.generate('fil')['source'], 'FALLBACK')   # Gemini failed
+            self.generate('en')                                             # cached
+            self.assertEqual(self.generate('fil')['source'], 'GEMINI')     # tried again
+            self.generate('en', force_regenerate=True)                      # new plan
+        self.assertEqual(ai.call_count, 4)
+        self.assertEqual(list(PlantingGuide.objects.get().translations), ['en'])
