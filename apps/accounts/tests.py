@@ -121,7 +121,6 @@ class ValidatorRoleTests(TestCase):
             ('put',    '/api/recommendations/rules/'),
             ('post',   '/api/recommendations/train/'),
             ('post',   '/api/predictions/train/'),
-            ('get',    '/api/ai/knowledge/'),
         ]
         for method, url in denied:
             self.assertEqual(getattr(v, method)(url, {}, format='json').status_code, 403, f'{method} {url}')

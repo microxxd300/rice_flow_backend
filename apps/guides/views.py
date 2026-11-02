@@ -597,6 +597,13 @@ def _fallback_steps(language='en', maturity_days=115):
     return out
 
 
+def _steps_snapshot(guide):
+    """The saved checklist in the shape the generators return, for the translations cache."""
+    return [{'title': st.title, 'instruction': st.description, 'category': st.category,
+             'daysAfterPlanting': st.days_after_planting or 0}
+            for st in guide.steps.order_by('step_no')]
+
+
 # ── The view ───────────────────────────────────────────────────────────────────
 class GeneratePlantingGuideView(APIView):
     """Generate a personalized planting guide using Gemini, adapting to logs + weather."""
@@ -642,27 +649,47 @@ class GeneratePlantingGuideView(APIView):
             print(f'[PLANTING GUIDE] SAVED steps for guide={guide.id} - skipping Gemini call', flush=True)
             return Response(_guide_response(guide, source='SAVED'), status=status.HTTP_200_OK)
 
-        # Latest environmental scan for this farm (soil + weather + flood)
-        scan = farm.environmental_scans.order_by('-id').first() if hasattr(farm, 'environmental_scans') else None
+        # Keep the current checklist under its language before it is replaced, so switching
+        # back reuses it. A forced regeneration is a new plan: the old translations go.
+        translations = {} if force else dict(guide.translations or {})
+        # Only real checklists are kept: a template (Gemini failed) is never in the cache.
+        # Guides from before the cache existed have none yet and are kept too.
+        keep_current = guide.language in translations or not translations
+        if not force and keep_current and guide.steps.exists():
+            translations[guide.language] = _steps_snapshot(guide)
 
-        # 7-day forecast for the farm's coords
-        forecast = _get_forecast(getattr(farm, 'latitude', None), getattr(farm, 'longitude', None))
+        steps = translations.get(language)
+        if steps:
+            source = 'CACHED'
+            print(f'[PLANTING GUIDE] CACHED {language} steps for guide={guide.id} - skipping Gemini call', flush=True)
+        else:
+            # Latest environmental scan for this farm (soil + weather + flood)
+            scan = farm.environmental_scans.order_by('-id').first() if hasattr(farm, 'environmental_scans') else None
 
-        # Console diagnostics — match the format the user expects to see in Django logs
-        flood_risk = getattr(scan, 'flood_risk', None) if scan else None
-        print(f'[PLANTING GUIDE] source=GEMINI | variety={variety.common_name} | flood_risk={flood_risk}', flush=True)
-        print(f'[PLANTING GUIDE] forecast={_format_forecast(forecast)}', flush=True)
-        print(f'[PLANTING GUIDE] logs=\n{_format_logs(logs)}', flush=True)
+            # 7-day forecast for the farm's coords
+            forecast = _get_forecast(getattr(farm, 'latitude', None), getattr(farm, 'longitude', None))
 
-        # Call Gemini (with all the adaptive context + selected language)
-        steps = _generate_ai_steps(variety, scan, logs, forecast, language, _current_day(farm))
-        source = 'GEMINI'
+            # Console diagnostics — match the format the user expects to see in Django logs
+            flood_risk = getattr(scan, 'flood_risk', None) if scan else None
+            print(f'[PLANTING GUIDE] source=GEMINI | variety={variety.common_name} | flood_risk={flood_risk}', flush=True)
+            print(f'[PLANTING GUIDE] forecast={_format_forecast(forecast)}', flush=True)
+            print(f'[PLANTING GUIDE] logs=\n{_format_logs(logs)}', flush=True)
 
-        # Fall back to template only if Gemini failed
-        if not steps:
-            steps = _fallback_steps(language, variety.maturity_days)
-            source = 'FALLBACK'
-            print(f'[PLANTING GUIDE] Gemini returned 0 steps - falling back to template ({language})', flush=True)
+            # Call Gemini (with all the adaptive context + selected language)
+            steps = _generate_ai_steps(variety, scan, logs, forecast, language, _current_day(farm))
+            source = 'GEMINI'
+
+            # Fall back to template only if Gemini failed
+            if not steps:
+                steps = _fallback_steps(language, variety.maturity_days)
+                source = 'FALLBACK'
+                print(f'[PLANTING GUIDE] Gemini returned 0 steps - falling back to template ({language})', flush=True)
+
+        # A template is not kept: the next switch to this language tries Gemini again
+        if source == 'FALLBACK':
+            translations.pop(language, None)
+        else:
+            translations[language] = steps
 
         print(f'[PLANTING GUIDE] source={source} | steps={len(steps)}', flush=True)
 
@@ -705,7 +732,8 @@ class GeneratePlantingGuideView(APIView):
                 ))
             GuideStep.objects.bulk_create(rows)
             guide.language = language
-            guide.save(update_fields=['language'])
+            guide.translations = translations
+            guide.save(update_fields=['language', 'translations'])
 
         return Response(_guide_response(guide, source=source), status=status.HTTP_200_OK)
 

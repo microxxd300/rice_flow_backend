@@ -534,7 +534,7 @@ Two staff roles, from the flags already on the user (no extra table):
 Admin only (a validator gets `403`): `/api/auth/users/` (list, create, edit, delete),
 `DELETE /api/farms/admin/<id>/`, `POST /api/farms/cleanup/`, `DELETE /api/progress/admin/cycles/<id>/`,
 `POST /api/varieties/`, `DELETE /api/varieties/<id>/`, `POST /api/varieties/import-csv/`,
-`PUT /api/recommendations/rules/`, both `train/` endpoints, `set-model/`, and `/api/ai/knowledge/`.
+`PUT /api/recommendations/rules/`, both `train/` endpoints, and `set-model/`.
 
 Farmer emails (`owner_email` in `/api/farms/all/` and `/api/progress/admin/cycles/`) are `null`
 for a validator: contact details are for the admin only (Data Privacy Act).
@@ -767,6 +767,17 @@ Content-Type: application/json
 ```
 `variety` is optional: the id of the variety the farmer picked. It must be one of the recommendation's results (otherwise `400`). Without it the guide keeps the variety picked earlier for this farm, or else uses the top-ranked one.
 
+`source` in the response says where the steps came from:
+
+| `source` | Meaning |
+|---|---|
+| `SAVED` | the guide is already in this language; nothing changed |
+| `CACHED` | the guide was made in this language before; that version is reused, no Gemini call |
+| `GEMINI` | new steps from Gemini (first time in this language, or `"force_regenerate": true`) |
+| `FALLBACK` | Gemini failed; a template is used and is not kept, so the next request tries Gemini again |
+
+Check-offs carry over between languages by step number. `"force_regenerate": true` makes a new plan and clears the saved languages.
+
 ### Append one new step to a guide
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/guides/append-step/{recommendation_id}/
@@ -838,34 +849,6 @@ variety, crop day, field logs, next guide steps and weather. Another user's farm
 
 The same first question within 6 hours returns the saved answer and does not count toward the limit.
 
-### AI knowledge sheet (admins only)
-```
-GET https://doing-haven-requisite.ngrok-free.dev/api/ai/knowledge/
-PUT https://doing-haven-requisite.ngrok-free.dev/api/ai/knowledge/
-Authorization: Bearer <ADMIN_TOKEN>
-ngrok-skip-browser-warning: true
-Content-Type: application/json
-
-{
-  "content": "Topdress urea at early tillering, about 21 days after transplanting. (Source: PhilRice PalayCheck)"
-}
-```
-
-The rice-farming reference the AI chat answers from, written by agriculturists from PhilRice
-and DA sources (each part names its source). It goes into every chat, so it is capped at
-`max_chars` (20,000, about 10 pages). Empty means the chat uses general knowledge. Admin role
-only: validators and farmers get `403`. Also editable in Django admin under **AI knowledge sheet**.
-
-**Response:**
-```json
-{
-  "content":         "Topdress urea at early tillering ... (Source: PhilRice PalayCheck)",
-  "updated_at":      "2026-10-30T15:20:00+08:00",
-  "updated_by_name": "agri@georice.app",
-  "max_chars":       20000
-}
-```
-
 ---
 
 ## 🗒️ Change log and farmer notices — `apps/activity/`
@@ -882,7 +865,7 @@ and farmers get `403`.
 
 Logged actions: accounts created, edited or deactivated; farms and cycles deleted; farm cleanup;
 varieties added, edited, deactivated or imported; suitability rules saved; models retrained or
-activated; the AI knowledge sheet saved. An edit that changes nothing is not logged.
+activated. An edit that changes nothing is not logged.
 
 ### Farmer notices (signed-in farmer)
 ```
