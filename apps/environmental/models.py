@@ -8,6 +8,8 @@ class EnvironmentalScan(models.Model):
     # Soil (from SoilGrids)
     soil_ph            = models.FloatField(null=True, blank=True)
     soil_texture       = models.CharField(max_length=50, blank=True)
+    # BSWM soil series at the pin, e.g. "Cabangan clay loam"; its texture replaces SoilGrids'
+    soil_series        = models.CharField(max_length=80, blank=True)
     organic_matter     = models.FloatField(null=True, blank=True)
     drainage           = models.CharField(max_length=50, blank=True)
     cec                = models.FloatField(null=True, blank=True)

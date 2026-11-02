@@ -14,6 +14,7 @@ from .services.openmeteo import (
 from .services.soilgrids import get_soil_data
 from .services.cache import cached, location_key
 from .services.sampling import combine_soil, sample_points
+from .services.soil_series import soil_series_at
 
 WEATHER_CACHE_TTL = 10 * 60
 
@@ -183,6 +184,12 @@ class ScanFarmView(APIView):
             soil_sampling = {'points': 0, 'points_without_data': 0, 'estimated': True,
                              'ph_range': None, 'clay_pct_range': None, 'varies': False, 'message': ''}
 
+        # BSWM's soil survey names the texture at the pin; it is measured, so it replaces
+        # the SoilGrids estimate (or the default when SoilGrids is down)
+        series = soil_series_at(lat, lon)
+        if series and series['texture']:
+            soil = {**soil, 'texture': series['texture']}
+
         slope = request.data.get('slope_pct', farm.slope_pct or 1.0)
 
         flood_risk = 'High' if (
@@ -194,6 +201,7 @@ class ScanFarmView(APIView):
             farm=farm,
             soil_ph=soil['ph'],
             soil_texture=soil['texture'],
+            soil_series=series['description'] if series else '',
             organic_matter=soil['organic_matter'],
             drainage=soil['drainage'],
             cec=soil['cec'],
