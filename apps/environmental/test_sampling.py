@@ -214,3 +214,50 @@ class SeasonalRainfallTests(TestCase):
         from apps.environmental.services.openmeteo import current_season
         self.assertEqual(current_season(date(2026, 10, 28)), 'wet')
         self.assertEqual(current_season(date(2026, 1, 15)), 'dry')
+
+
+class SoilSeriesTests(SimpleTestCase):
+    """The BSWM soil series map (apps/environmental/data/panabo_soil_series.geojson)."""
+
+    def test_texture_is_read_from_the_series_name(self):
+        from apps.environmental.services.soil_series import texture_of
+        self.assertEqual(texture_of('Cabangan clay loam'), 'clay loam')
+        self.assertEqual(texture_of('San Manuel silty clay loam'), 'silty clay loam')
+        self.assertEqual(texture_of('Camasan sandy clay loam'), 'sandy clay loam')
+        self.assertEqual(texture_of('Faraon clay'), 'clay')
+        self.assertIsNone(texture_of('Rough mountainous land'))
+
+    def test_panabo_pins_get_their_series_and_outside_gets_none(self):
+        from apps.environmental.services.soil_series import soil_series_at
+        self.assertEqual(soil_series_at(*PIN)['description'], 'Cabangan clay loam')
+        self.assertEqual(soil_series_at(*PIN)['texture'], 'clay loam')
+        self.assertIsNone(soil_series_at(7.219, 125.619))      # Davao City, south of Panabo
+
+
+@mock.patch('apps.environmental.views.get_elevation', return_value=20.0)
+@mock.patch('apps.environmental.views.get_rainfall_summary',
+            return_value={'annual': 2600.0, 'wet_season': 1500.0, 'dry_season': 1100.0})
+@mock.patch('apps.environmental.views.get_current_weather', return_value={
+    'avg_temperature': 27.0, 'temp_at_flowering': 27.0, 'weekly_rainfall_mm': 100.0,
+    'humidity_pct': 80.0, 'solar_radiation': 17.0, 'wind_speed_ms': 2.0, 'sunshine_hours': 6.0})
+class ScanSoilSeriesTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        user = User.objects.create_user(username='farmer', password='pass12345')
+        self.farm = Farm.objects.create(user=user, name='Paddy', barangay='Gredu',
+                                        latitude=PIN[0], longitude=PIN[1], area_hectares=1)
+        self.client = APIClient()
+        self.client.force_authenticate(user)
+
+    def test_bswm_texture_replaces_the_soilgrids_estimate(self, *_):
+        with mock.patch('apps.environmental.views.get_soil_data', return_value=soil(6.0, 10, sand=75)):
+            r = self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['soil_texture'], 'clay loam')        # SoilGrids alone: sandy loam
+        self.assertEqual(r.json()['soil_series'], 'Cabangan clay loam')
+        self.assertEqual(r.json()['soil_ph'], 6.0)                      # pH still from SoilGrids
+
+    def test_bswm_texture_also_covers_a_soilgrids_outage(self, *_):
+        with mock.patch('apps.environmental.views.get_soil_data', side_effect=ConnectionError):
+            r = self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
+        self.assertEqual(r.json()['soil_texture'], 'clay loam')        # fallback alone: loam

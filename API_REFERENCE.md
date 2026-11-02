@@ -587,6 +587,8 @@ ngrok-skip-browser-warning: true
 
 **What this does:** The backend gets the farm's GPS coordinates, then **calls SoilGrids and Open-Meteo in parallel** using ThreadPoolExecutor. It saves the combined result as one row in `environmental_scans`. This is the data later used by RSI scoring.
 
+**Soil texture from BSWM:** the texture comes from the **BSWM Philippine Soil Series** map at the pin (`soil_series`, e.g. "Cabangan clay loam" → `soil_texture` "clay loam"). It is a measured soil survey, so it replaces the SoilGrids texture, and it still works when SoilGrids is down. The map is clipped to Panabo City by `python manage.py load_soil_series --shapefile <PhilSoilSeries.shp>` into `apps/environmental/data/panabo_soil_series.geojson`. pH, organic matter and drainage still come from SoilGrids (or the defaults).
+
 **Soil across the whole farm:** soil is read at the pin **plus points north, east, south and west of it**, spread over the farm's `area_hectares` (one point per 250 m SoilGrids pixel, so usually 1–5 points). The readings are averaged; points where SoilGrids has no data (built-up areas, water) are left out. Weather, rainfall and elevation are read at the pin, since their grids are bigger than a farm. The extra `soil_sampling` field reports what happened:
 
 | Field | Meaning |
@@ -605,6 +607,7 @@ ngrok-skip-browser-warning: true
   "farm": 1,
   "soil_ph": 6.2,
   "soil_texture": "clay loam",
+  "soil_series": "Cabangan clay loam",
   "organic_matter": 2.5,
   "drainage": "poorly drained",
   "avg_temperature": 27,
