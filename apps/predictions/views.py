@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import log_change
 
 from apps.farms.models import Farm
 from apps.varieties.models import RiceVariety
@@ -34,6 +35,7 @@ class TrainModelsView(APIView):
             YieldPredictionModel.objects.create(**r)
 
         models = YieldPredictionModel.objects.all()
+        log_change(request.user, 'model.trained', 'retrained the yield prediction models')
         return Response({
             'message': 'Models trained successfully.',
             'results': YieldPredictionModelSerializer(models, many=True).data,

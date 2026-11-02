@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from .permissions import IsSuperUser
+from apps.activity.record import diff, display_name, field_list, log_change, role_of
 from config.exceptions import client_ip, security_log
 from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
 from apps.progress.stages import growth_stages, stage_today
@@ -97,7 +98,13 @@ class AdminUserListView(APIView):
 
     def post(self, request):
         """Create a new user account (admin-initiated)."""
-        return _create_or_update_user(request, instance=None)
+        res = _create_or_update_user(request, instance=None)
+        if res.status_code == status.HTTP_201_CREATED:
+            user = User.objects.get(pk=res.data['id'])
+            log_change(request.user, 'user.created',
+                       f'created the {role_of(user)} account of {display_name(user)}',
+                       target=display_name(user))
+        return res
 
     def patch(self, request):
         """
@@ -110,9 +117,14 @@ class AdminUserListView(APIView):
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        was_active = user.is_active
         if 'is_active' in request.data:
             user.is_active = bool(request.data['is_active'])
         user.save()
+        if user.is_active != was_active:
+            verb = 'reactivated' if user.is_active else 'deactivated'
+            log_change(request.user, 'user.updated', f'{verb} the account of {display_name(user)}',
+                       target=display_name(user), changes={'active': [was_active, user.is_active]})
         return Response({'id': user.id, 'is_active': user.is_active})
 
 
@@ -135,7 +147,18 @@ class AdminUserDetailView(APIView):
             user = User.objects.get(pk=pk)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return _create_or_update_user(request, instance=user)
+        before = _audit_fields(user)
+        res = _create_or_update_user(request, instance=user)
+        if res.status_code == status.HTTP_200_OK:
+            user.refresh_from_db()
+            changes = diff(before, _audit_fields(user))
+            if (request.data.get('password') or '').strip():
+                changes['password'] = ['', 'changed']
+            if changes:
+                log_change(request.user, 'user.updated',
+                           f'edited the account of {display_name(user)} ({field_list(changes)})',
+                           target=display_name(user), changes=changes)
+        return res
 
     def delete(self, request, pk):
         try:
@@ -148,8 +171,12 @@ class AdminUserDetailView(APIView):
                 {'error': 'You cannot deactivate your own account.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        was_active = user.is_active
         user.is_active = False
         user.save(update_fields=['is_active'])
+        if was_active:
+            log_change(request.user, 'user.deactivated', f'deactivated the account of {display_name(user)}',
+                       target=display_name(user), changes={'active': [True, False]})
         return Response({'id': user.id, 'is_active': False})
 
 
@@ -217,6 +244,14 @@ _EDITABLE_FIELDS = (
     'phone', 'barangay', 'municipality', 'province',
 )
 _ROLES = ('farmer', 'admin', 'superadmin')
+
+
+def _audit_fields(u):
+    """The account fields the change log compares before and after an edit."""
+    return {
+        'name': display_name(u), 'username': u.username, 'email': u.email, 'phone': u.phone,
+        'barangay': u.barangay, 'role': role_of(u), 'active': u.is_active,
+    }
 
 
 def _create_or_update_user(request, instance=None):

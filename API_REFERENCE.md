@@ -865,6 +865,40 @@ only: validators and farmers get `403`. Also editable in Django admin under **AI
 
 ---
 
+## 🗒️ Change log and farmer notices — `apps/activity/`
+
+### Change log (admin only)
+```
+GET /api/activity/changes/?role=validator&limit=50
+```
+Every change made from the admin website, newest first: who (`actor_name`, `actor_role` =
+`admin`/`validator`), what (`action`, `summary`, `target`), when (`created_at`), and the old and
+new values (`changes`: `{"avg_yield_t_ha": [5.2, 5.4]}`). Passwords are never recorded, only
+`"password": ["", "changed"]`. `role` and `limit` (default 100, max 500) are optional. Validators
+and farmers get `403`.
+
+Logged actions: accounts created, edited or deactivated; farms and cycles deleted; farm cleanup;
+varieties added, edited, deactivated or imported; suitability rules saved; models retrained or
+activated; the AI knowledge sheet saved. An edit that changes nothing is not logged.
+
+### Farmer notices (signed-in farmer)
+```
+GET /api/activity/notices/?after=<id>
+```
+The farmer's own notices from the last 30 days, newest first (at most 20); `after` returns only
+newer ones. The app checks this when it opens and puts them in the bell.
+
+| `kind` | When | `params` |
+|---|---|---|
+| `farm_removed` | the admin deleted their farm | `farm` |
+| `cycle_removed` | the admin deleted their crop cycle | `farm`, `season`, `year` |
+| `variety_updated` | a variety they are growing (active cycle) was edited | `variety` |
+| `variety_retired` | a variety they are growing was deactivated | `variety` |
+
+`title` and `body` are the English text; the app words the known kinds in the farmer's language.
+
+---
+
 ## 📊 Yield Prediction (Linear Regression) — `apps/predictions/`
 
 ### Predict yield from farm features

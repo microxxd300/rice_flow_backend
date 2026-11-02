@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import log_change
 from apps.environmental.models import EnvironmentalScan
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
@@ -92,9 +93,15 @@ class SuitabilityRulesView(APIView):
 
     def put(self, request):
         rs = SuitabilityRuleSet.objects.first()
+        before = (rs.payload if rs else {}) or {}
         serializer = SuitabilityRuleSetSerializer(rs, data=request.data, partial=False)
         serializer.is_valid(raise_exception=True)
         rs = serializer.save(updated_by=request.user)
+        changes = _rule_changes(before, rs.payload or {})
+        if changes:
+            log_change(request.user, 'rules.updated',
+                       f'saved the suitability rules ({len(changes)} value{"s" if len(changes) != 1 else ""} changed)',
+                       target='Suitability rules', changes=changes)
         out = SuitabilityRuleSetSerializer(rs).data
         out['source'] = 'database'
         return Response(out, status=status.HTTP_200_OK)
@@ -170,6 +177,21 @@ class GenerateRecommendationView(APIView):
         return Response(RecommendationSerializer(rec).data, status=status.HTTP_201_CREATED)
 
 
+def _rule_changes(before, after):
+    """{"<factor> <field>": [old, new]} for every suitability value that changed."""
+    old = {r.get('key'): r for r in before.get('rules', []) if isinstance(r, dict)}
+    changes = {}
+    for rule in after.get('rules', []):
+        if not isinstance(rule, dict):
+            continue
+        prev = old.get(rule.get('key'), {})
+        label = rule.get('label') or rule.get('key')
+        for field, value in rule.items():
+            if field not in ('key', 'label', 'group', 'unit', 'type') and prev.get(field) != value:
+                changes[f'{label} {field}'] = [prev.get(field), value]
+    return changes
+
+
 class TrainModelsView(APIView):
     permission_classes = [IsSuperUser]
 
@@ -178,6 +200,7 @@ class TrainModelsView(APIView):
             saved = train_and_record()
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
+        log_change(request.user, 'model.trained', 'retrained the K-Means clustering models')
         return Response({'models': ClusterModelSerializer(saved, many=True).data,
                          'message': 'Training complete. K-Means is now the active model.'})
 
@@ -190,6 +213,8 @@ class SetActiveModelView(APIView):
             cm = ClusterModel.objects.get(name=model_name)
             cm.is_active = True
             cm.save()
+            log_change(request.user, 'model.activated',
+                       f'made {cm.get_name_display()} the active clustering model')
             return Response({'message': f'{cm.get_name_display()} is now active.'})
         except ClusterModel.DoesNotExist:
             return Response({'error': 'Model not found.'}, status=404)

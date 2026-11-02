@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.accounts.permissions import IsSuperUser, can_see_contacts
+from apps.activity.record import display_name, log_change, notify_cycle_removed
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
 from .stages import growth_stages, stage_today
@@ -84,10 +85,14 @@ class AdminFarmCycleDetailView(APIView):
 
     def delete(self, request, pk):
         try:
-            cycle = FarmCycle.objects.get(pk=pk)
+            cycle = FarmCycle.objects.select_related('farm__user').get(pk=pk)
         except FarmCycle.DoesNotExist:
             return Response({'error': 'Farm cycle not found.'},
                             status=status.HTTP_404_NOT_FOUND)
+        notify_cycle_removed(cycle)
+        log_change(request.user, 'cycle.deleted',
+                   f'deleted the {cycle.get_season_display()} {cycle.year} cycle on "{cycle.farm.name}" '
+                   f'of {display_name(cycle.farm.user)}', target=cycle.farm.name)
         cycle.delete()
         return Response({'id': pk, 'deleted': True})
 

@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import log_change
 
 from apps.varieties.models import RiceVariety
 
@@ -293,6 +294,8 @@ class KnowledgeSheetView(APIView):
         serializer = KnowledgeSheetSerializer(KnowledgeSheet.current(), data=request.data)
         serializer.is_valid(raise_exception=True)
         data = KnowledgeSheetSerializer(serializer.save(updated_by=request.user)).data
+        log_change(request.user, 'knowledge.updated',
+                   f'updated the AI knowledge sheet ({len(data.get("content") or "")} characters)')
         data['max_chars'] = MAX_KNOWLEDGE_CHARS
         return Response(data)
 
