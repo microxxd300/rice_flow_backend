@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import display_name, log_change, notify_farm_removed
 from .location_check import check_pin
 from .models import Farm
 from .serializers import FarmSerializer, AdminFarmSerializer
@@ -102,6 +103,9 @@ class AdminFarmDeleteView(APIView):
             farm = Farm.objects.get(pk=pk)
         except Farm.DoesNotExist:
             return Response({'error': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
+        notify_farm_removed(farm)
+        log_change(request.user, 'farm.deleted',
+                   f'deleted the farm "{farm.name}" of {display_name(farm.user)}', target=farm.name)
         farm.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -119,6 +123,11 @@ class AdminFarmCleanupView(APIView):
             if len(farms) > 1:
                 to_delete = farms[1:]  # keep farms[0] (newest)
                 ids = [f.id for f in to_delete]
+                for f in to_delete:
+                    notify_farm_removed(f)
                 Farm.objects.filter(id__in=ids).delete()
                 deleted_total += len(ids)
+        if deleted_total:
+            log_change(request.user, 'farm.cleanup',
+                       f'removed {deleted_total} older duplicate farm{"s" if deleted_total != 1 else ""}')
         return Response({'deleted': deleted_total})

@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
 from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import diff, field_list, log_change, notify_variety_planters
 from .models import RiceVariety, GrowthStage, FertilizerSchedule, PestDisease
 from .serializers import (
     RiceVarietySerializer, GrowthStageSerializer,
@@ -35,6 +36,10 @@ class RiceVarietyListView(_ReadAnyWriteAdmin, ListCreateAPIView):
     POST → create a new variety (admin only).
     """
     serializer_class = RiceVarietySerializer
+
+    def perform_create(self, serializer):
+        v = serializer.save()
+        log_change(self.request.user, 'variety.created', f'added the variety {v}', target=str(v))
 
     def get_queryset(self):
         qs = RiceVariety.objects.all()
@@ -144,6 +149,9 @@ class VarietyImportCSVView(APIView):
                 errors.append({'line': line_no, 'errors': [str(e)[:160]]})
                 skipped += 1
 
+        if created or updated:
+            log_change(request.user, 'variety.imported',
+                       f'imported a variety CSV: {created} added, {updated} updated, {skipped} skipped')
         return Response({
             'created':  created,
             'updated':  updated,
@@ -249,13 +257,25 @@ class RiceVarietyDetailView(_ReadAnyWriteAdmin, RetrieveUpdateDestroyAPIView):
         # Deactivating is admin only, so a validator's edit keeps the variety's status
         if not self.request.user.is_superuser:
             serializer.validated_data.pop('is_active', None)
-        serializer.save()
+        before = RiceVarietySerializer(serializer.instance).data
+        v = serializer.save()
+        changes = diff(before, RiceVarietySerializer(v).data)
+        if changes:
+            log_change(self.request.user, 'variety.updated',
+                       f'edited the variety {v} ({field_list(changes)})', target=str(v), changes=changes)
+            notify_variety_planters(v, 'variety_retired' if changes.get('is_active') == [True, False]
+                                    else 'variety_updated')
 
     def perform_destroy(self, instance):
         # Soft delete to preserve referential integrity with historical
         # RecommendationResult rows that point at this variety.
+        if not instance.is_active:
+            return
         instance.is_active = False
         instance.save(update_fields=['is_active'])
+        log_change(self.request.user, 'variety.deactivated', f'deactivated the variety {instance}',
+                   target=str(instance), changes={'is_active': [True, False]})
+        notify_variety_planters(instance, 'variety_retired')
 
 
 class GrowthStageListView(ListAPIView):
