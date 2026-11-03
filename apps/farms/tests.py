@@ -136,3 +136,63 @@ class FarmOutsidePanaboTests(TestCase):
         farm_id = self.client.post('/api/farms/', self.farm(7.33, 125.62), format='json').json()['id']
         r = self.client.patch(f'/api/farms/{farm_id}/', {'latitude': 7.46496, 'longitude': 125.57712}, format='json')
         self.assertEqual(r.status_code, 400)
+
+
+class BarangayFromPinTests(TestCase):
+    """Farmers do not pick a barangay: it follows the farm pin (apps/farms/barangays.py)."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from apps.accounts.models import User
+        self.user = User.objects.create_user(username='farmer', password='pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_known_pins_get_their_barangay_and_gaps_get_the_nearest(self):
+        from apps.farms.barangays import barangay_at
+        self.assertEqual(barangay_at(7.2796, 125.6421), 'Maduao')       # missing from the old app list
+        self.assertEqual(barangay_at(7.3434, 125.6381), 'Nanyo')
+        self.assertIsNotNone(barangay_at(7.3073, 125.6837))           # Gredu's centre sits in a gap
+
+    def test_check_location_names_the_barangay(self):
+        r = self.client.get('/api/farms/check-location/?lat=7.2796&lon=125.6421').json()
+        self.assertEqual(r['barangay'], 'Maduao')
+        outside = self.client.get('/api/farms/check-location/?lat=37.422&lon=-122.084').json()
+        self.assertIsNone(outside['barangay'])
+
+    def test_a_new_farm_gets_its_barangay_from_the_pin_not_the_app(self):
+        r = self.client.post('/api/farms/', {'name': 'Paddy', 'barangay': 'Gredu', 'latitude': 7.2796,
+                                             'longitude': 125.6421, 'area_hectares': 1}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['barangay'], 'Maduao')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.barangay, 'Maduao')                 # the farmer's own, from the first farm
+
+    def test_a_second_farm_keeps_the_farmers_barangay(self):
+        self.client.post('/api/farms/', {'name': 'First', 'latitude': 7.2796, 'longitude': 125.6421,
+                                         'area_hectares': 1}, format='json')
+        second = self.client.post('/api/farms/', {'name': 'Second', 'latitude': 7.3434, 'longitude': 125.6381,
+                                                  'area_hectares': 1}, format='json').json()
+        self.assertEqual(second['barangay'], 'Nanyo')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.barangay, 'Maduao')
+
+    def test_moving_the_pin_moves_the_barangay(self):
+        farm_id = self.client.post('/api/farms/', {'name': 'Paddy', 'latitude': 7.2796, 'longitude': 125.6421,
+                                                   'area_hectares': 1}, format='json').json()['id']
+        r = self.client.patch(f'/api/farms/{farm_id}/', {'latitude': 7.3434, 'longitude': 125.6381}, format='json')
+        self.assertEqual(r.json()['barangay'], 'Nanyo')
+        r = self.client.patch(f'/api/farms/{farm_id}/', {'barangay': 'Gredu'}, format='json')
+        self.assertEqual(r.json()['barangay'], 'Nanyo')                # the app cannot override it
+
+
+class RegisterWithoutBarangayTests(TestCase):
+    def test_register_needs_no_barangay_and_fills_city_and_province(self):
+        from rest_framework.test import APIClient
+        from apps.accounts.models import User
+        r = APIClient().post('/api/auth/register/', {
+            'email': 'new@georice.app', 'password': 'Palay-Tanim-2026', 'password2': 'Palay-Tanim-2026',
+            'first_name': 'Ana', 'last_name': 'Cruz', 'barangay': 'Gredu'}, format='json')
+        self.assertEqual(r.status_code, 201, r.content)
+        user = User.objects.get(email='new@georice.app')
+        self.assertEqual((user.barangay, user.municipality, user.province), ('', 'Panabo City', 'Davao del Norte'))

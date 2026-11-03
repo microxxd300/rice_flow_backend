@@ -387,7 +387,8 @@ https://api.open-meteo.com/v1/elevation?latitude=7.3086&longitude=125.6830
 
 ## 🗺️ OpenStreetMap Nominatim — reverse geocoding
 
-**What it gives us:** human-readable address from lat/lng (e.g., barangay name).
+**What it gives us:** human-readable address from lat/lng. RiceFlow no longer uses it for the
+barangay (that comes from the official boundaries; see Farms).
 
 **Base URL:** `https://nominatim.openstreetmap.org/reverse`
 
@@ -491,12 +492,11 @@ ngrok-skip-browser-warning: true
   "password":     "strongpassword",
   "password2":    "strongpassword",
   "first_name":   "Juan",
-  "last_name":    "Dela Cruz",
-  "barangay":     "Tibungol",
-  "municipality": "Panabo City",
-  "province":     "Davao del Norte"
+  "last_name":    "Dela Cruz"
 }
 ```
+No barangay at sign-up: the farmer's barangay is taken from their first farm pin. City and
+province are always Panabo City and Davao del Norte.
 
 ### Login
 ```
@@ -559,13 +559,18 @@ Content-Type: application/json
 
 {
   "name":           "Santos Family Farm",
-  "barangay":       "Tibungol",
   "latitude":       7.3086,
   "longitude":      125.6830,
   "area_hectares":  2.5,
   "ecosystem":      "irrigated_lowland"
 }
 ```
+`barangay` is read-only: the server sets it from the pin using the official barangay boundaries
+(NAMRIA v2023-11-06 + PSA PSGC, `apps/farms/land_data/panabo_barangays.geojson`), and again when
+the pin moves. A pin between two barangays gets the nearest one. `GET /api/farms/check-location/`
+returns the same `barangay` so the app can show it while the farmer moves the pin.
+`python manage.py fix_farm_barangays` lists farms whose saved barangay differs from their pin
+(`--apply` saves).
 
 ### Get one farm
 ```

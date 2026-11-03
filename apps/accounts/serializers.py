@@ -12,8 +12,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
+        # No barangay: it is taken from the farmer's first farm pin (apps/farms/barangays.py)
         fields = ['email', 'password', 'password2', 'first_name', 'last_name',
-                  'barangay', 'municipality', 'province']
+                  'municipality', 'province']
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
