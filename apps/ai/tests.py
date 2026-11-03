@@ -11,6 +11,8 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.environmental.models import EnvironmentalScan
 from apps.farms.models import Farm
+from apps.guides import palaycheck
+from apps.guides.models import GuideStep, PlantingGuide
 from apps.progress.models import FarmCycle, ProgressLog
 from apps.varieties.models import RiceVariety
 
@@ -128,9 +130,9 @@ class AIChatFarmerDataTests(TestCase):
         self.url = reverse('ai-chat')
         self.farm = Farm.objects.create(user=self.user, name='Santos Family Farm', barangay='Nanyo',
                                         latitude=7.3, longitude=125.68, area_hectares=1.5)
-        variety = RiceVariety.objects.create(variety_id='T18', nsic_code='NSIC Rc222', common_name='Tubigan 18',
-                                             ecosystem='irrigated_lowland', season='both', maturity_days=114,
-                                             avg_yield_t_ha=5.2, max_yield_t_ha=8.0)
+        self.variety = variety = RiceVariety.objects.create(
+            variety_id='T18', nsic_code='NSIC Rc222', common_name='Tubigan 18', ecosystem='irrigated_lowland',
+            season='both', maturity_days=114, avg_yield_t_ha=5.2, max_yield_t_ha=8.0)
         EnvironmentalScan.objects.create(farm=self.farm, soil_texture='Clay', soil_ph=6.2, flood_risk='Low')
         cycle = FarmCycle.objects.create(farm=self.farm, variety=variety, season='wet', year=2026,
                                          planting_date=timezone.localdate() - timedelta(days=28),
@@ -153,6 +155,25 @@ class AIChatFarmerDataTests(TestCase):
                      '31.5 mm rain'):
             self.assertIn(fact, prompt)
         self.assertNotIn('Santos', prompt)   # no names go to Gemini
+
+    @patch.object(views.requests, 'post', return_value=gemini_reply('Apply the first fertilizer.'))
+    def test_the_prompt_carries_only_the_current_palaycheck_step(self, post, _weather):
+        guide = PlantingGuide.objects.create(farm=self.farm, variety=self.variety, season='Wet Season',
+                                             start_date=timezone.localdate() - timedelta(days=28))
+        today = timezone.localdate()
+        for n, (key, kc, done, due) in enumerate([('seeds', 1, True, -38), ('fertilizer1', 5, False, -1),
+                                                  ('lcc', 5, False, 6)], start=1):
+            GuideStep.objects.create(guide=guide, step_no=n, template_key=key, key_check=kc, title=key,
+                                     description='', category='fertilizer', is_completed=done,
+                                     days_after_planting=28 + due, scheduled_date=today + timedelta(days=due))
+        self.chat('What should I do now?')
+        prompt = self.system_prompt(post)
+        self.assertIn('Current planting-guide step (PalayCheck 2022, pp. 35-38, KeyCheck 5', prompt)
+        self.assertIn('(1 days late)', prompt)
+        self.assertIn(palaycheck.text('fertilizer1', 'en')['instruction'], prompt)
+        self.assertNotIn(palaycheck.text('seeds', 'en')['title'], prompt)   # done
+        self.assertNotIn(palaycheck.text('lcc', 'en')['title'], prompt)     # later steps are not sent
+        self.assertIn('follow the current planting-guide step', prompt)
 
     @patch.object(views.requests, 'post', return_value=gemini_reply('OK.'))
     def test_another_farmers_farm_is_never_used(self, post, _weather):

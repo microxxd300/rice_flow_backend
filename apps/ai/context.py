@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.environmental.services.openmeteo import get_current_weather
 from apps.farms.models import Farm
+from apps.guides import palaycheck
 from apps.guides.models import PlantingGuide
 from apps.progress.models import ProgressLog
 from apps.progress.stages import stage_today
@@ -17,6 +18,24 @@ MAX_NOTE_CHARS = 120
 def _short(text) -> str:
     text = ' '.join(str(text or '').split())
     return text if len(text) <= MAX_NOTE_CHARS else text[:MAX_NOTE_CHARS] + '...'
+
+
+def _current_step(guide, today) -> str:
+    """The one PalayCheck step the farmer is on (the first not done, as the app shows it),
+    with its book text and page, so answers follow the book. Only this step is sent:
+    the whole guide would spend the free Gemini tokens on every question."""
+    step = guide.steps.filter(is_completed=False).order_by('days_after_planting', 'step_no').first()
+    if not step:
+        return 'Planting guide: every PalayCheck step is done.'
+    due = step.scheduled_date
+    when = ('' if not due else f', due {due:%B %d}' if due >= today
+            else f', due {due:%B %d} ({(today - due).days} days late)')
+    if step.template_key not in palaycheck.TEXT:   # a guide from before PalayCheck
+        return f'Current planting-guide step{when}: {_short(step.title)}.'
+    words = palaycheck.text(step.template_key, 'en')
+    ref = palaycheck.reference(palaycheck.PAGES[step.template_key])
+    return (f'Current planting-guide step ({ref}, KeyCheck {step.key_check}{when}): '
+            f'{words["title"]}. {words["instruction"]}')
 
 
 def _selected_farm(user, farm_id):
@@ -77,10 +96,7 @@ def farmer_context(user, farm_id=None) -> str:
         lines.append('No crop is planted yet (no active planting cycle).')
 
     if guide:
-        steps = guide.steps.filter(is_completed=False).order_by('days_after_planting', 'step_no')[:3]
-        if steps:
-            lines.append('Next planting-guide steps not done yet: ' + '; '.join(
-                f'day {s.days_after_planting}: {_short(s.title)}' for s in steps) + '.')
+        lines.append(_current_step(guide, today))
 
     logs = ProgressLog.objects.filter(farm_cycle__farm=farm).order_by('-log_date', '-id')[:3]
     for log in logs:
