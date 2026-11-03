@@ -23,7 +23,7 @@ FRIENDLY = {
     'temp_at_flowering': 'flowering-time temperature',
     'elevation':         'elevation',
     'slope':             'land slope',
-    'stress_tolerance':  'flood/drought tolerance',
+    'stress_tolerance':  'fit for your farm type and season',
 }
 
 
