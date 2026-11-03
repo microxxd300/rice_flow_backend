@@ -1,7 +1,9 @@
 from datetime import timedelta
 
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+from apps.guides.models import GuideStep
 from apps.farms.models import Farm
 from apps.varieties.models import GrowthStage
 from .models import FarmCycle, ProgressLog, YieldRecord
@@ -18,6 +20,11 @@ class OwnFarmField(serializers.PrimaryKeyRelatedField):
 class OwnFarmCycleField(serializers.PrimaryKeyRelatedField):
     def get_queryset(self):
         return FarmCycle.objects.filter(farm__user=self.context['request'].user)
+
+
+class OwnGuideStepField(serializers.PrimaryKeyRelatedField):
+    def get_queryset(self):
+        return GuideStep.objects.filter(guide__farm__user=self.context['request'].user)
 
 
 class FarmCycleSerializer(serializers.ModelSerializer):
@@ -61,10 +68,28 @@ class FarmCycleSerializer(serializers.ModelSerializer):
 
 class ProgressLogSerializer(serializers.ModelSerializer):
     farm_cycle = OwnFarmCycleField()
+    guide_step = OwnGuideStepField(required=False, allow_null=True)
 
     class Meta:
         model = ProgressLog
         fields = '__all__'
+
+    def validate(self, attrs):
+        step = attrs.get('guide_step')
+        cycle = attrs.get('farm_cycle', getattr(self.instance, 'farm_cycle', None))
+        if step and cycle and step.guide.farm_id != cycle.farm_id:
+            raise serializers.ValidationError({'guide_step': "This step is not in this farm's planting guide."})
+        return attrs
+
+    def create(self, validated_data):
+        log = super().create(validated_data)
+        # Logging a guide step is how the farmer finishes it
+        step = log.guide_step
+        if step and not step.is_completed:
+            step.is_completed = True
+            step.completed_at = timezone.now()
+            step.save(update_fields=['is_completed', 'completed_at'])
+        return log
 
 
 class YieldRecordSerializer(serializers.ModelSerializer):

@@ -52,6 +52,10 @@ class ProgressLog(models.Model):
     severity      = models.CharField(max_length=10, choices=SEVERITY_CHOICES, blank=True)
     action_taken  = models.TextField(blank=True)
     photo_url     = models.URLField(blank=True)
+    # The planting-guide step this log records; saving the log marks the step done (the
+    # guide shows one step at a time and moves on when the farmer logs it)
+    guide_step    = models.ForeignKey('guides.GuideStep', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='logs')
     created_at    = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
