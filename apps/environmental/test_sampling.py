@@ -261,3 +261,60 @@ class ScanSoilSeriesTests(TestCase):
         with mock.patch('apps.environmental.views.get_soil_data', side_effect=ConnectionError):
             r = self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
         self.assertEqual(r.json()['soil_texture'], 'clay loam')        # fallback alone: loam
+
+
+@mock.patch('apps.environmental.views.get_elevation', return_value=20.0)
+@mock.patch('apps.environmental.views.get_rainfall_summary', return_value=None)
+@mock.patch('apps.environmental.views.get_current_weather', return_value={
+    'avg_temperature': 27.0, 'temp_at_flowering': 27.0, 'weekly_rainfall_mm': 100.0,
+    'humidity_pct': 80.0, 'solar_radiation': 17.0, 'wind_speed_ms': 2.0, 'sunshine_hours': 6.0})
+class ScanDeletedFarmTests(TestCase):
+    def test_a_farm_deleted_during_the_scan_is_a_404_not_a_crash(self, *_):
+        user = User.objects.create_user(username='farmer', password='pass12345')
+        farm = Farm.objects.create(user=user, name='Gone', barangay='Gredu',
+                                   latitude=PIN[0], longitude=PIN[1], area_hectares=1)
+        client = APIClient()
+        client.force_authenticate(user)
+
+        def delete_then_answer(lat, lon):
+            Farm.objects.filter(pk=farm.pk).delete()      # the app gave up and removed the farm
+            return None
+
+        # Soil is fetched in worker threads (their own DB connection); the soil series
+        # lookup runs on the request's thread, after the slow calls have answered
+        with mock.patch('apps.environmental.views.get_soil_data', return_value=soil(6.2, 33)),              mock.patch('apps.environmental.views.soil_series_at', side_effect=delete_then_answer):
+            r = client.post(f'/api/environmental/scan/{farm.id}/', {}, format='json')
+        self.assertEqual(r.status_code, 404)
+        self.assertFalse(EnvironmentalScan.objects.exists())
+
+
+@mock.patch('apps.environmental.views.get_elevation', return_value=20.0)
+@mock.patch('apps.environmental.views.get_rainfall_summary', return_value=None)
+@mock.patch('apps.environmental.views.get_current_weather', return_value={
+    'avg_temperature': 27.0, 'temp_at_flowering': 27.0, 'weekly_rainfall_mm': 100.0,
+    'humidity_pct': 80.0, 'solar_radiation': 17.0, 'wind_speed_ms': 2.0, 'sunshine_hours': 6.0})
+class ScanSoilWaitTests(TestCase):
+    def test_a_hanging_soilgrids_does_not_hold_up_the_scan(self, *_):
+        import threading
+        import time
+        user = User.objects.create_user(username='farmer', password='pass12345')
+        farm = Farm.objects.create(user=user, name='Paddy', barangay='Gredu',
+                                   latitude=PIN[0], longitude=PIN[1], area_hectares=1)
+        client = APIClient()
+        client.force_authenticate(user)
+        release = threading.Event()
+
+        def hang(lat, lon):
+            release.wait(5)               # SoilGrids not answering
+            return soil(5.0, 20)
+
+        with mock.patch('apps.environmental.views.SOIL_WAIT_S', 0.2), \
+             mock.patch('apps.environmental.views.get_soil_data', side_effect=hang):
+            start = time.monotonic()
+            r = client.post(f'/api/environmental/scan/{farm.id}/', {}, format='json')
+            took = time.monotonic() - start
+        release.set()
+        self.assertEqual(r.status_code, 201)
+        self.assertLess(took, 3)
+        self.assertTrue(r.json()['soil_sampling']['estimated'])
+        self.assertEqual(r.json()['soil_texture'], 'clay loam')      # BSWM still applies

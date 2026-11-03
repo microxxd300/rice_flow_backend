@@ -63,13 +63,49 @@ class LocationCacheTests(TestCase):
     def setUp(self):
         cache.clear()
 
-    @mock.patch('requests.get', return_value=fake_response({'properties': {'layers': []}}))
+    @mock.patch('requests.get', return_value=fake_response({'properties': {'layers': [
+        {'name': 'phh2o', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': 64}}]}]}}))
     def test_soil_lookup_is_cached_per_location(self, get):
         first = get_soil_data(7.3, 125.68)
         second = get_soil_data(7.3, 125.68)
 
         self.assertEqual(first, second)
+        self.assertEqual(first['ph'], 6.4)
         get.assert_called_once()
+
+    @mock.patch('requests.get', return_value=fake_response({'properties': {'layers': []}}))
+    def test_a_pixel_without_data_is_not_cached(self, get):
+        first = get_soil_data(7.3, 125.68)
+        get_soil_data(7.3, 125.68)
+
+        self.assertFalse(first['from_soilgrids'])
+        self.assertEqual(get.call_count, 2)          # asked again: defaults are never kept
+
+    def test_an_outage_is_skipped_for_ten_minutes_and_not_cached(self):
+        import requests
+        from apps.environmental.services import soilgrids
+
+        def down(url, params=None, timeout=None):
+            if url == soilgrids.SOILGRIDS_URL:
+                raise requests.ConnectionError('503')
+            return mock.Mock(**{'raise_for_status.return_value': None,
+                                'text': 'GetFeatureInfo results: Search returned no results.'})
+
+        with mock.patch('requests.get', side_effect=down) as get:
+            first = get_soil_data(7.3, 125.68)
+            calls = get.call_count
+            second = get_soil_data(7.31, 125.69)       # another farm, same outage
+        self.assertFalse(first['from_soilgrids'])
+        self.assertEqual(first['ph'], 6.2)
+        self.assertFalse(second['from_soilgrids'])
+        self.assertEqual(get.call_count, calls)       # skipped: no wait on SoilGrids
+        self.assertTrue(cache.get(soilgrids.OUTAGE_KEY))
+
+        cache.delete(soilgrids.OUTAGE_KEY)            # outage over
+        layers = {'properties': {'layers': [{'name': 'phh2o', 'depths': [
+            {'label': '0-5cm', 'values': {'Q0.5': 66}}]}]}}
+        with mock.patch('requests.get', return_value=fake_response(layers)):
+            self.assertEqual(get_soil_data(7.3, 125.68)['ph'], 6.6)   # the default was not cached
 
     def test_unreachable_cache_falls_back_to_fetching(self):
         with mock.patch.object(cache_service.cache, 'get', side_effect=ConnectionError):
