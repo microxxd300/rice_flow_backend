@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.accounts.permissions import can_see_contacts
+from .barangays import barangay_at
 from .location_check import MESSAGES, check_pin, in_panabo, location_flag
 from .models import Farm
 
@@ -8,7 +9,8 @@ class FarmSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Farm
         fields = '__all__'
-        read_only_fields = ['user', 'location_flag', 'created_at', 'updated_at']
+        # The barangay follows the pin (barangays.py); the app cannot set it
+        read_only_fields = ['user', 'barangay', 'location_flag', 'created_at', 'updated_at']
 
     # Outside Panabo City is refused. Inside, warn, never block: the app asks the farmer
     # before saving; here we only record the result so admins can review pins kept
@@ -22,14 +24,23 @@ class FarmSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        validated_data['location_flag'] = self._flag(validated_data['latitude'], validated_data['longitude'])
-        return super().create(validated_data)
+        lat, lon = validated_data['latitude'], validated_data['longitude']
+        validated_data['location_flag'] = self._flag(lat, lon)
+        validated_data['barangay'] = barangay_at(float(lat), float(lon)) or ''
+        farm = super().create(validated_data)
+        # The farmer's own barangay is their first farm's
+        user = farm.user
+        if not user.barangay and farm.barangay:
+            user.barangay = farm.barangay
+            user.save(update_fields=['barangay'])
+        return farm
 
     def update(self, instance, validated_data):
         lat = validated_data.get('latitude', instance.latitude)
         lon = validated_data.get('longitude', instance.longitude)
         if (lat, lon) != (instance.latitude, instance.longitude):
             validated_data['location_flag'] = self._flag(lat, lon)
+            validated_data['barangay'] = barangay_at(float(lat), float(lon)) or instance.barangay
             validated_data.setdefault('location_confirmed', False)
         return super().update(instance, validated_data)
 

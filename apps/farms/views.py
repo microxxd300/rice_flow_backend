@@ -6,13 +6,15 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from apps.accounts.permissions import IsSuperUser
 from apps.activity.record import display_name, log_change, notify_farm_removed
+from .barangays import barangay_at
 from .location_check import check_pin
 from .models import Farm
 from .serializers import FarmSerializer, AdminFarmSerializer
 
 
 class FarmLocationCheckView(APIView):
-    """GET /api/farms/check-location/?lat=7.30&lon=125.68 — is this pin on farmland?"""
+    """GET /api/farms/check-location/?lat=7.30&lon=125.68 — is this pin on farmland, and in
+    which barangay? The app shows the barangay as the farmer moves the pin."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -23,7 +25,9 @@ class FarmLocationCheckView(APIView):
             return Response({'error': 'lat and lon are required numbers.'}, status=status.HTTP_400_BAD_REQUEST)
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             return Response({'error': 'lat/lon out of range.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(check_pin(lat, lon))
+        result = check_pin(lat, lon)
+        result['barangay'] = None if result['status'] == 'outside' else barangay_at(lat, lon)
+        return Response(result)
 
 
 class FarmListCreateView(generics.ListCreateAPIView):
