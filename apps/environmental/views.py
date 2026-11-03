@@ -1,5 +1,6 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import requests
+from django.db import IntegrityError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -140,6 +141,9 @@ SOIL_FALLBACK = {
 }
 
 
+SOIL_WAIT_S = 20
+
+
 def _safe(fn, *args, fallback=None):
     try:
         return fn(*args)
@@ -162,11 +166,16 @@ class ScanFarmView(APIView):
         # Soil is read at several points across the farm's area (see services/sampling.py);
         # weather, rainfall and elevation at the pin. All calls run in parallel with fallbacks.
         points = sample_points(lat, lon, farm.area_hectares)
-        with ThreadPoolExecutor(max_workers=3 + len(points)) as ex:
-            f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
-            f_rain      = ex.submit(_safe, get_rainfall_summary, lat, lon)
-            f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
-            f_soils     = [ex.submit(_safe, get_soil_data, p_lat, p_lon) for p_lat, p_lon in points]
+        ex = ThreadPoolExecutor(max_workers=3 + len(points))
+        f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
+        f_rain      = ex.submit(_safe, get_rainfall_summary, lat, lon)
+        f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
+        f_soils     = [ex.submit(_safe, get_soil_data, p_lat, p_lon) for p_lat, p_lon in points]
+        # SoilGrids can hang for most of a minute. The scan waits SOIL_WAIT_S for it, then
+        # goes on with the points that answered; a slower point still finishes in the
+        # background and fills the cache for the next scan.
+        wait(f_soils, timeout=SOIL_WAIT_S)
+        ex.shutdown(wait=False)
 
         weather   = f_weather.result()
         rain      = f_rain.result()
@@ -176,7 +185,8 @@ class ScanFarmView(APIView):
         annual   = rain['annual'] if rain else 1800.0
         seasonal = rain[f'{season}_season'] if rain else annual / 2
         elevation = f_elevation.result()
-        soil_samples = [s for s in (f.result() for f in f_soils) if s]  # failed points are skipped
+        # Failed points, and points still waiting on SoilGrids, are skipped
+        soil_samples = [s for s in (f.result() for f in f_soils if f.done()) if s]
         if soil_samples:
             soil, soil_sampling = combine_soil(soil_samples)
         else:
@@ -197,28 +207,35 @@ class ScanFarmView(APIView):
             farm.ecosystem == 'rainfed_lowland' and elevation < 50
         ) else 'Low'
 
-        scan = EnvironmentalScan.objects.create(
-            farm=farm,
-            soil_ph=soil['ph'],
-            soil_texture=soil['texture'],
-            soil_series=series['description'] if series else '',
-            organic_matter=soil['organic_matter'],
-            drainage=soil['drainage'],
-            cec=soil['cec'],
-            nitrogen_ppm=soil['nitrogen_ppm'],
-            bulk_density=soil['bulk_density'],
-            avg_temperature=weather['avg_temperature'],
-            temp_at_flowering=weather['temp_at_flowering'],
-            annual_rainfall_mm=annual,
-            seasonal_rainfall_mm=seasonal,
-            humidity_pct=weather['humidity_pct'],
-            solar_radiation=weather['solar_radiation'],
-            wind_speed_ms=weather['wind_speed_ms'],
-            sunshine_hours=weather['sunshine_hours'],
-            elevation_m=elevation,
-            slope_pct=slope,
-            flood_risk=flood_risk,
-        )
+        # The scan takes a while; the app may have given up and deleted the farm meanwhile
+        if not Farm.objects.filter(pk=farm.pk).exists():
+            return Response({'error': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            scan = EnvironmentalScan.objects.create(
+                farm=farm,
+                soil_ph=soil['ph'],
+                soil_texture=soil['texture'],
+                soil_series=series['description'] if series else '',
+                organic_matter=soil['organic_matter'],
+                drainage=soil['drainage'],
+                cec=soil['cec'],
+                nitrogen_ppm=soil['nitrogen_ppm'],
+                bulk_density=soil['bulk_density'],
+                avg_temperature=weather['avg_temperature'],
+                temp_at_flowering=weather['temp_at_flowering'],
+                annual_rainfall_mm=annual,
+                seasonal_rainfall_mm=seasonal,
+                humidity_pct=weather['humidity_pct'],
+                solar_radiation=weather['solar_radiation'],
+                wind_speed_ms=weather['wind_speed_ms'],
+                sunshine_hours=weather['sunshine_hours'],
+                elevation_m=elevation,
+                slope_pct=slope,
+                flood_risk=flood_risk,
+            )
+        except IntegrityError:
+            # Deleted in the moment between the check and the save
+            return Response({'error': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         farm.elevation_m = elevation
         farm.save(update_fields=['elevation_m'])

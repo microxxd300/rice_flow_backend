@@ -589,6 +589,8 @@ ngrok-skip-browser-warning: true
 
 **Soil texture from BSWM:** the texture comes from the **BSWM Philippine Soil Series** map at the pin (`soil_series`, e.g. "Cabangan clay loam" → `soil_texture` "clay loam"). It is a measured soil survey, so it replaces the SoilGrids texture, and it still works when SoilGrids is down. The map is clipped to Panabo City by `python manage.py load_soil_series --shapefile <PhilSoilSeries.shp>` into `apps/environmental/data/panabo_soil_series.geojson`. pH, organic matter and drainage still come from SoilGrids (or the defaults).
 
+**When SoilGrids is slow or down:** a scan waits at most 20 s for soil, then uses the points that answered (or the defaults, `soil_sampling.estimated: true`); a slow point still finishes in the background and is cached for the next scan. After a failure SoilGrids is skipped for 10 minutes, so other scans do not wait on it. Only real SoilGrids values are cached (30 days), never defaults. A farm deleted while its scan runs gets `404`.
+
 **Soil across the whole farm:** soil is read at the pin **plus points north, east, south and west of it**, spread over the farm's `area_hectares` (one point per 250 m SoilGrids pixel, so usually 1–5 points). The readings are averaged; points where SoilGrids has no data (built-up areas, water) are left out. Weather, rainfall and elevation are read at the pin, since their grids are bigger than a farm. The extra `soil_sampling` field reports what happened:
 
 | Field | Meaning |

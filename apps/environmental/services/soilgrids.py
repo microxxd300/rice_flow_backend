@@ -2,6 +2,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+from django.core.cache import cache
 
 from .cache import cached_by_location
 
@@ -91,10 +92,26 @@ def _wms_layers(lat: float, lon: float) -> list:
             for prop in SOIL_PROPERTIES]
 
 
-# Soil properties do not change between scans.
+# While SoilGrids is down, scans skip it for this long instead of waiting on it each time
+OUTAGE_KEY = "soilgrids:down"
+OUTAGE_TTL = 10 * 60
+
+
+class SoilGridsDown(requests.RequestException):
+    """The REST API failed and the WMS had no values either."""
+
+
+class NoSoilData(Exception):
+    """SoilGrids answered but has no values here (built-up areas, water)."""
+
+
+# Soil properties do not change between scans, so real values are kept 30 days. Defaults
+# are never cached, or a farm scanned during an outage would keep them after it ends.
 # v3: organic matter in % (was 10x too high). v4: root-zone median instead of 0-5 cm mean.
-@cached_by_location("soilgrids:soil:v4", ttl=30 * 24 * 60 * 60)
-def get_soil_data(lat: float, lon: float) -> dict:
+# v5: only measured values are cached.
+@cached_by_location("soilgrids:soil:v5", ttl=30 * 24 * 60 * 60)
+def _soilgrids_values(lat: float, lon: float) -> dict:
+    """Root-zone medians by property name. Raises SoilGridsDown or NoSoilData."""
     params = {
         "lon":      lon,
         "lat":      lat,
@@ -102,6 +119,7 @@ def get_soil_data(lat: float, lon: float) -> dict:
         "depth":    [label for label, _ in ROOT_ZONE],
         "value":    "Q0.5",
     }
+    rest_failed = False
     try:
         # SoilGrids is a free research service and often takes 20-40 s to answer
         resp = requests.get(SOILGRIDS_URL, params=params, timeout=40)
@@ -109,15 +127,32 @@ def get_soil_data(lat: float, lon: float) -> dict:
         layers = resp.json().get("properties", {}).get("layers", [])
     except requests.RequestException:
         # The REST API is paused at times; the WMS serves the same maps
+        rest_failed = True
         layers = _wms_layers(lat, lon)
 
     props = {p["name"]: _root_zone_median(p) for p in layers}
-    if layers and not any(v is not None for v in props.values()):
-        # A degraded REST API answers with nulls for pixels the WMS still has. Built-up
-        # areas and water are null in both, and the defaults below fill them in.
+    if layers and not rest_failed and not any(v is not None for v in props.values()):
+        # A degraded REST API answers with nulls for pixels the WMS still has
         try:
             props = {p["name"]: _root_zone_median(p) for p in _wms_layers(lat, lon)}
         except Exception:
+            pass
+    if not any(v is not None for v in props.values()):
+        if rest_failed:
+            raise SoilGridsDown("REST API down and the WMS has no values")
+        raise NoSoilData()
+    return props
+
+
+def get_soil_data(lat: float, lon: float) -> dict:
+    """Soil at a point from SoilGrids, with defaults where it has no values or is down."""
+    props = {}
+    if not cache.get(OUTAGE_KEY):
+        try:
+            props = _soilgrids_values(lat, lon)
+        except requests.RequestException:
+            cache.set(OUTAGE_KEY, True, OUTAGE_TTL)
+        except NoSoilData:
             pass
     # SoilGrids has no values for built-up areas and water; the defaults below fill the gaps
     from_soilgrids = any(v is not None for v in props.values())
