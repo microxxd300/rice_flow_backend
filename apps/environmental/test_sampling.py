@@ -61,8 +61,8 @@ class CombineSoilTests(SimpleTestCase):
         self.assertTrue(sampling['varies'])
 
     def test_points_without_soilgrids_data_are_left_out(self):
-        default = {**soil(6.2, 35), 'from_soilgrids': False}   # built-up area: defaults only
-        real = {**soil(5.2, 37.4), 'from_soilgrids': True}
+        default = {**soil(6.2, 35), 'measured': False}   # built-up area: defaults only
+        real = {**soil(5.2, 37.4), 'measured': True}
         combined, sampling = combine_soil([default, real])
         self.assertEqual(combined['ph'], 5.2)
         self.assertEqual(sampling['points'], 1)
@@ -70,7 +70,7 @@ class CombineSoilTests(SimpleTestCase):
         self.assertFalse(sampling['estimated'])
 
     def test_no_point_with_data_is_marked_estimated(self):
-        default = {**soil(6.2, 35), 'from_soilgrids': False}
+        default = {**soil(6.2, 35), 'measured': False}
         combined, sampling = combine_soil([default, default])
         self.assertEqual(combined['ph'], 6.2)  # same values as before sampling existed
         self.assertTrue(sampling['estimated'])
@@ -135,6 +135,10 @@ class ScanSamplingTests(TestCase):
 class OrganicMatterUnitTests(TestCase):
     def setUp(self):
         cache.clear()
+        # These tests exercise SoilGrids: leave out the OpenLandMap file saved on this machine
+        olm = mock.patch('apps.environmental.services.soilgrids.openlandmap_values', return_value={})
+        olm.start()
+        self.addCleanup(olm.stop)
 
     def test_soc_in_dg_per_kg_becomes_organic_matter_percent(self):
         layers = [{'name': 'soc', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': 613}}]}]  # 6.13 % SOC
@@ -170,7 +174,7 @@ class OrganicMatterUnitTests(TestCase):
             soil = get_soil_data(7.36, 125.62)
         self.assertEqual(soil['organic_matter'], round(2.0 * 1.724, 2))
         self.assertEqual(soil['ph'], 5.2)
-        self.assertTrue(soil['from_soilgrids'])
+        self.assertTrue(soil['measured'])
         self.assertEqual(get.call_count, 1 + 8 * 3)     # REST, then 8 properties x 3 depths
 
     def test_wms_is_used_when_the_rest_api_returns_only_nulls(self):
@@ -187,7 +191,7 @@ class OrganicMatterUnitTests(TestCase):
 
         with mock.patch('requests.get', side_effect=fake_get):
             soil = get_soil_data(7.37, 125.62)
-        self.assertTrue(soil['from_soilgrids'])
+        self.assertTrue(soil['measured'])
         self.assertEqual(soil['organic_matter'], round(2.0 * 1.724, 2))
 
     def test_missing_soc_keeps_the_default(self):
@@ -257,6 +261,13 @@ class ScanSoilSeriesTests(TestCase):
         self.assertEqual(r.json()['soil_series'], 'Cabangan clay loam')
         self.assertEqual(r.json()['soil_ph'], 6.0)                      # pH still from SoilGrids
 
+    def test_the_scan_records_which_soil_map_it_used(self, *_):
+        reading = {**soil(5.5, 29), 'source': 'openlandmap', 'measured': True}
+        with mock.patch('apps.environmental.views.get_soil_data', return_value=reading):
+            r = self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
+        self.assertEqual(r.json()['soil_source'], 'openlandmap')
+        self.assertEqual(r.json()['soil_sampling']['source'], 'openlandmap')
+
     def test_bswm_texture_also_covers_a_soilgrids_outage(self, *_):
         with mock.patch('apps.environmental.views.get_soil_data', side_effect=ConnectionError):
             r = self.client.post(f'/api/environmental/scan/{self.farm.id}/', {}, format='json')
@@ -318,3 +329,43 @@ class ScanSoilWaitTests(TestCase):
         self.assertLess(took, 3)
         self.assertTrue(r.json()['soil_sampling']['estimated'])
         self.assertEqual(r.json()['soil_texture'], 'clay loam')      # BSWM still applies
+
+
+class OpenLandMapTests(TestCase):
+    """The OpenLandMap grid saved for Panabo is read first; SoilGrids is only the backup."""
+
+    def setUp(self):
+        cache.clear()
+        import numpy as np
+        from apps.environmental.services import openlandmap
+
+        def full(v):
+            return np.full((2, 2), v, dtype=np.float32)
+
+        grid = {'west': 125.60, 'north': 7.40, 'res_x': 0.1, 'res_y': 0.1,
+                'ph': full(5.5), 'clay': full(30), 'sand': full(40), 'silt': full(30),
+                'soc': full(20.0), 'bd': full(1.3)}
+        grid['ph'][1, 1] = np.nan                                    # one pixel without data
+        p = mock.patch.object(openlandmap, '_grid', return_value=grid)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_values_come_from_the_saved_grid_in_soilgrids_units(self):
+        from apps.environmental.services.openlandmap import openlandmap_values
+        v = openlandmap_values(7.35, 125.65)
+        self.assertEqual((v['phh2o'], v['clay'], v['soc'], v['bdod']), (55.0, 300.0, 200.0, 130.0))
+        self.assertEqual(openlandmap_values(6.0, 125.65), {})        # outside the saved area
+
+    def test_a_scan_point_uses_openlandmap_without_calling_soilgrids(self):
+        with mock.patch('requests.get') as get:
+            soil = get_soil_data(7.35, 125.65)
+        get.assert_not_called()
+        self.assertEqual((soil['ph'], soil['source'], soil['measured']), (5.5, 'openlandmap', True))
+        self.assertEqual(soil['organic_matter'], round(2.0 * 1.724, 2))   # 20 g/kg SOC = 2.0 %
+
+    def test_outside_the_grid_falls_back_to_soilgrids(self):
+        layers = [{'name': 'phh2o', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': 64}}]}]
+        resp = mock.Mock(**{'json.return_value': {'properties': {'layers': layers}}})
+        with mock.patch('requests.get', return_value=resp):
+            soil = get_soil_data(6.0, 125.65)
+        self.assertEqual((soil['ph'], soil['source']), (6.4, 'soilgrids'))

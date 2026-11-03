@@ -9,6 +9,7 @@ different parts as separate farms.
 Weather is not sampled this way: Open-Meteo's grid cells are larger than any farm, so
 every point would return the same values.
 """
+from collections import Counter
 import math
 
 from .soilgrids import _classify_texture
@@ -63,7 +64,7 @@ def combine_soil(samples: list[dict]) -> tuple[dict, dict]:
     says how many points were used, the pH and clay ranges, whether the soil varies, and
     whether the values are estimates because no point had SoilGrids data.
     """
-    measured = [s for s in samples if s.get('from_soilgrids', True)]
+    measured = [s for s in samples if s.get('measured', True)]
     no_data = len(samples) - len(measured)
     samples = measured or samples
     soil = {
@@ -81,6 +82,9 @@ def combine_soil(samples: list[dict]) -> tuple[dict, dict]:
         'points': len(samples),
         'points_without_data': no_data,
         'estimated': not measured,
+        # Which soil map the values came from ('openlandmap' or 'soilgrids'), or 'default'
+        'source': Counter(s.get('source', 'soilgrids') for s in measured).most_common(1)[0][0]
+                  if measured else 'default',
         'ph_range': [min(ph), max(ph)],
         'clay_pct_range': [min(clay), max(clay)],
         'varies': varies,
