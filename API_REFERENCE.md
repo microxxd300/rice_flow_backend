@@ -760,7 +760,7 @@ ngrok-skip-browser-warning: true
 
 ## 📖 Planting Guides (`apps/guides/`)
 
-### Generate a planting guide using Gemini
+### Get the PalayCheck planting guide
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/guides/generate/{recommendation_id}/
 Authorization: Bearer <TOKEN>
@@ -770,37 +770,28 @@ Content-Type: application/json
 {
   "variety":  12,
   "season":   "Wet Season",
-  "language": "en",
-  "logs":     []
+  "language": "en"
 }
 ```
+The steps are a summary of the PalayCheck System 2022 Revised Edition (DA-PhilRice), timed for the variety's maturity (`apps/guides/palaycheck.py`). No AI writes them.
+
 `variety` is optional: the id of the variety the farmer picked. It must be one of the recommendation's results (otherwise `400`). Without it the guide keeps the variety picked earlier for this farm, or else uses the top-ranked one.
 
-`source` in the response says where the steps came from:
+`language` (`en`, `fil`, `ceb`) only changes the wording: the step ids and check-offs stay the same.
 
 | `source` | Meaning |
 |---|---|
-| `SAVED` | the guide is already in this language; nothing changed |
-| `CACHED` | the guide was made in this language before; that version is reused, no Gemini call |
-| `GEMINI` | new steps from Gemini (first time in this language, or `"force_regenerate": true`) |
-| `FALLBACK` | Gemini failed; a template is used and is not kept, so the next request tries Gemini again |
+| `PALAYCHECK` | the steps were just built (a new guide, a guide from before PalayCheck, or `"force_regenerate": true`) |
+| `SAVED` | the saved steps, worded in the requested language |
 
-Check-offs carry over between languages by step number. `"force_regenerate": true` makes a new plan and clears the saved languages.
+`start_date` is the sowing day (day 0), 10 days after the guide is made, so the first step (seed preparation) is due the day the guide is made. Each step:
 
-### Append one new step to a guide
-```
-POST https://doing-haven-requisite.ngrok-free.dev/api/guides/append-step/{recommendation_id}/
-Authorization: Bearer <TOKEN>
-ngrok-skip-browser-warning: true
-Content-Type: application/json
-
+```json
 {
-  "category":       "fertilizer",
-  "last_day":       20,
-  "existing_count": 8,
-  "variety":        12,
-  "language":       "en",
-  "logs":           []
+  "id": 301, "stepNumber": 1, "key": "seeds", "keyCheck": 1,
+  "title": "...", "instruction": "...", "explanation": "...",
+  "reference": "PalayCheck 2022, pp. 14-15", "referenceUrl": "https://www.philrice.gov.ph/...pdf",
+  "daysAfterPlanting": -10, "category": "planting", "is_completed": false
 }
 ```
 
@@ -996,9 +987,11 @@ Content-Type: application/json
   "issue_type":   "pest",
   "severity":     "low",
   "action_taken": "Sprayed pesticide",
-  "observation":  "Saw a few stem borers"
+  "observation":  "Saw a few stem borers",
+  "guide_step":   301
 }
 ```
+- `guide_step` (optional) is the planting guide step this log finishes; saving the log marks that step done. It must be a step of the cycle's farm (otherwise `400`)
 - `growth_stage` is a GrowthStage id from `GET /api/varieties/growth-stages/` (optional)
 - `issue_type`: `pest`, `disease`, `weather`, `nutrient`, `other`, or `""` for none
 - `severity`: `low`, `medium`, `high`, or `""`
@@ -1072,7 +1065,7 @@ Use PATCH on the same URL to correct a saved record.
 | **Open-Meteo Forecast** | api.open-meteo.com/v1/forecast | None | temperature, humidity, rainfall |
 | **Open-Meteo Elevation** | api.open-meteo.com/v1/elevation | None | elevation in meters |
 | **Nominatim** | nominatim.openstreetmap.org | None | reverse geocoding |
-| **Gemini** | generativelanguage.googleapis.com | API key (server-side) | AI chat + planting guide |
+| **Gemini** | generativelanguage.googleapis.com | API key (server-side) | AI chat |
 | **Our backend** | doing-haven-requisite.ngrok-free.dev/api | JWT | everything else |
 | **Health check** | /api/health/ | None | deploy and uptime checks |
 | **WLC weights** | /api/recommendations/rules/ | JWT | the validated reference-table |

@@ -11,9 +11,6 @@ class PlantingGuide(models.Model):
     # Language the saved steps were generated in — a request in a different
     # language triggers regeneration instead of returning mismatched text.
     language    = models.CharField(max_length=5, default='en')
-    # The checklist in each language it has been generated in ({"fil": [step, ...]}), so
-    # switching back to a language reuses it instead of asking Gemini again
-    translations = models.JSONField(default=dict, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -27,6 +24,10 @@ class GuideStep(models.Model):
     guide           = models.ForeignKey(PlantingGuide, on_delete=models.CASCADE, related_name='steps')
     growth_stage    = models.ForeignKey(GrowthStage, on_delete=models.SET_NULL, null=True, blank=True)
     step_no         = models.IntegerField()
+    # The PalayCheck step this row is (palaycheck.STEPS key) and its KeyCheck; blank on rows
+    # from before PalayCheck (Gemini guides)
+    template_key    = models.CharField(max_length=30, blank=True)
+    key_check       = models.PositiveSmallIntegerField(null=True, blank=True)
     title           = models.CharField(max_length=150)
     description     = models.TextField()
     category        = models.CharField(max_length=20, blank=True, default='')
