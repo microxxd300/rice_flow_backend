@@ -138,7 +138,8 @@ class GenerateRecommendationView(APIView):
                 'variety_cluster': v_cluster,
             })
 
-        results.sort(key=lambda x: x['rsi_score'], reverse=True)
+        # Equal scores: the higher-yielding variety first, not whichever the database lists first
+        results.sort(key=lambda x: (x['rsi_score'], x['variety'].avg_yield_t_ha or 0), reverse=True)
         top3 = results[:3]
 
         rec = Recommendation.objects.create(

@@ -194,13 +194,41 @@ def _score_eco_threshold(value, ecosystem, rule):
     return N
 
 
-def _score_stress_tolerance(variety, scan, rule=None):
+LOWLAND = ('irrigated_lowland', 'rainfed_lowland')
+RAIN_FED = ('rainfed_lowland', 'upland')
+
+
+def planting_season(scan) -> str:
+    """'wet' (May-October) or 'dry' (November-April): the season the farm plants in,
+    from the scan date (DA cropping seasons for Davao del Norte)."""
+    from apps.environmental.services.openmeteo import current_season
+    scanned = getattr(scan, 'scanned_at', None)
+    return current_season(scanned.date() if scanned else None)
+
+
+def _grows_in(variety, season) -> bool:
+    """Whether the variety is bred for the season ('Dry/Wet', 'Wet', 'Dry', 'both'...)."""
+    s = str(getattr(variety, 'season', '') or '').lower()
+    return not s or 'both' in s or season in s
+
+
+def _score_stress_tolerance(variety, scan, rule=None, ecosystem=None, season=None):
     """
-    Derived score: combines variety tolerances with environmental risk
-    levels reported in the scan. Hardcoded logic (not configurable).
+    Derived score (hardcoded, not configurable): how well the variety fits this kind of
+    farm in the season it is planted. Every other factor scores the farm alone, so this
+    is the factor that ranks one variety above another on the same farm.
+
+    - A variety bred for another farm type (rainfed or upland on an irrigated farm...) is S3.
+    - A variety bred only for the other season is at most S2.
+    - Wet season on lowland farms: flood risk is at least moderate, so submergence-tolerant
+      varieties rank first. Dry season on rainfed and upland farms: drought risk is high,
+      so drought-tolerant varieties rank first (irrigation covers an irrigated farm).
     """
+    season = season or planting_season(scan)
     flood_risk    = (scan.flood_risk or 'Low').lower() if hasattr(scan, 'flood_risk') else 'low'
-    drought_risk  = 'low'
+    if season == 'wet' and ecosystem in LOWLAND and flood_risk == 'low':
+        flood_risk = 'moderate'
+    drought_risk  = 'high' if season == 'dry' and ecosystem in RAIN_FED else 'low'
     salinity_risk = 'low'
 
     score = S1
@@ -208,11 +236,18 @@ def _score_stress_tolerance(variety, scan, rule=None):
     dro_tol = getattr(variety, 'drought_tolerance', 'moderate')     or 'moderate'
     sal_tol = getattr(variety, 'salinity_tolerance', 'moderate')    or 'moderate'
 
+    variety_eco = getattr(variety, 'ecosystem', None)
+    if ecosystem and variety_eco and variety_eco != ecosystem:
+        score = min(score, S3)
+    if not _grows_in(variety, season):
+        score = min(score, S2)
     if flood_risk == 'high' and sub_tol == 'low':
         score = N
     elif flood_risk == 'moderate' and sub_tol == 'low':
         score = min(score, S2)
     if drought_risk == 'high' and dro_tol == 'low':
+        score = min(score, S3)
+    elif drought_risk == 'high' and dro_tol == 'moderate':
         score = min(score, S2)
     if salinity_risk == 'high' and sal_tol == 'low':
         score = min(score, S2)
@@ -238,7 +273,7 @@ def calculate_rsi(variety, scan, ecosystem: str) -> dict:
         'temp_at_flowering': _score_range       (scan.temp_at_flowering        or 27,   rules['temp_at_flowering']),
         'elevation':         _score_eco_threshold(scan.elevation_m             or 45,   ecosystem, rules['elevation']),
         'slope':             _score_eco_threshold(scan.slope_pct               or 1,    ecosystem, rules['slope']),
-        'stress_tolerance':  _score_stress_tolerance(variety, scan, rules.get('stress_tolerance')),
+        'stress_tolerance':  _score_stress_tolerance(variety, scan, rules.get('stress_tolerance'), ecosystem),
     }
 
     rsi = round(sum(scores[k] * weights.get(k, 0) for k in scores), 2)
