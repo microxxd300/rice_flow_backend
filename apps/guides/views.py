@@ -108,6 +108,51 @@ def _sowing_day(farm):
     return timezone.now().date() + timedelta(days=palaycheck.PREP_DAYS)
 
 
+LEGACY_SEASONS = ('Wet Season', 'Dry Season')
+
+
+def season_label(sowing) -> str:
+    """The cropping season a sowing day falls in (DA, Davao del Norte): 'Wet Season 2026'
+    (May-October) or 'Dry Season 2026-27' (November-April)."""
+    if 5 <= sowing.month <= 10:
+        return f'Wet Season {sowing.year}'
+    start = sowing.year if sowing.month >= 11 else sowing.year - 1
+    return f'Dry Season {start}-{str(start + 1)[-2:]}'
+
+
+def _crop_is_over(guide) -> bool:
+    """The guide's crop is finished: every step logged, or harvest was over a month ago.
+    The farm's next crop of this variety then gets a new guide, not the finished one."""
+    steps = guide.steps.all()
+    if steps.exists() and not steps.filter(is_completed=False).exists():
+        return True
+    harvest = guide.start_date + timedelta(days=int(guide.variety.maturity_days or 120))
+    return timezone.now().date() > harvest + timedelta(days=30)
+
+
+def _guide_for(farm, variety, season, language):
+    """The guide to show. Older app versions name the season ('Wet Season'); the app now
+    leaves it out and gets the guide of the crop under way, or a new one for a new crop."""
+    if season in LEGACY_SEASONS:   # what every app version sent before; it named no crop
+        season = None
+    if season:
+        guide = (PlantingGuide.objects.filter(farm=farm, variety=variety, season=season)
+                 .order_by('-created_at').first())
+    else:
+        guide = (PlantingGuide.objects.filter(farm=farm, variety=variety)
+                 .select_related('variety').order_by('-created_at').first())
+        if guide and _crop_is_over(guide):
+            guide = None
+    if not guide:
+        sowing = _sowing_day(farm)
+        return PlantingGuide.objects.create(farm=farm, variety=variety, season=season or season_label(sowing),
+                                            start_date=sowing, language=language)
+    if guide.season in LEGACY_SEASONS:   # saved before seasons had dates
+        guide.season = season_label(guide.start_date)
+        guide.save(update_fields=['season'])
+    return guide
+
+
 def _cycle_follows_guide(rec, guide, picked=None):
     """A scan starts the crop cycle (top-ranked variety, sown the day of the scan) before
     there is a guide. Until field work is logged, that cycle follows the guide: the variety
@@ -120,23 +165,27 @@ def _cycle_follows_guide(rec, guide, picked=None):
     variety = picked or cycle.variety
     harvest = (guide.start_date + timedelta(days=int(variety.maturity_days))
                if variety and variety.maturity_days else cycle.expected_harvest_date)
-    if (cycle.variety_id, cycle.planting_date, cycle.expected_harvest_date) == \
-            (variety and variety.id, guide.start_date, harvest):
+    sown = guide.start_date
+    season = 'wet' if 5 <= sown.month <= 10 else 'dry'
+    if (cycle.variety_id, cycle.planting_date, cycle.expected_harvest_date, cycle.season, cycle.year) == \
+            (variety and variety.id, sown, harvest, season, sown.year):
         return
     cycle.variety = variety
-    cycle.planting_date = guide.start_date
+    cycle.planting_date = sown
     cycle.expected_harvest_date = harvest
-    cycle.save(update_fields=['variety', 'planting_date', 'expected_harvest_date'])
+    cycle.season, cycle.year = season, sown.year
+    cycle.save(update_fields=['variety', 'planting_date', 'expected_harvest_date', 'season', 'year'])
 
 
 # ── The view ───────────────────────────────────────────────────────────────────
 class GeneratePlantingGuideView(APIView):
     """The farm's PalayCheck planting guide for the chosen variety.
 
-    POST body: {"variety": 12, "season": "Wet Season", "language": "en" | "fil" | "ceb",
-                "force_regenerate": false}
-    The steps are saved once per farm + variety + season, so check-offs survive reinstalls;
-    the language only changes the wording, never the steps.
+    POST body: {"variety": 12, "language": "en" | "fil" | "ceb", "force_regenerate": false}
+    One guide per crop: the farm's guide for the variety is reused (check-offs survive
+    reinstalls) until that crop is over, then the next crop gets a new one. Its season
+    ("Dry Season 2026-27") comes from the sowing day. Older app versions also send
+    "season"; the language only changes the wording, never the steps.
     """
     permission_classes = [IsAuthenticated]
 
@@ -160,10 +209,7 @@ class GeneratePlantingGuideView(APIView):
             language = 'en'
 
         # start_date is the sowing day (day 0 of the guide)
-        guide, _ = PlantingGuide.objects.get_or_create(
-            farm=rec.farm, variety=variety, season=request.data.get('season', 'Wet Season'),
-            defaults={'start_date': _sowing_day(rec.farm), 'language': language},
-        )
+        guide = _guide_for(rec.farm, variety, request.data.get('season'), language)
         _cycle_follows_guide(rec, guide, variety if request.data.get('variety') not in (None, '') else None)
         # A guide from before PalayCheck (Gemini steps), or a new plan, gets the PalayCheck steps
         if request.data.get('force_regenerate') or not _is_palaycheck(guide):

@@ -14,6 +14,7 @@ from apps.varieties.models import RiceVariety
 
 from . import palaycheck
 from .models import GuideStep, PlantingGuide
+from .views import season_label
 
 
 def make_variety(maturity_days=110, code='T14', name='Tubigan 14'):
@@ -85,6 +86,7 @@ class ChosenVarietyTests(TestCase):
         self.assertEqual(res.data['start_date'], sowing.isoformat())
         self.assertEqual(cycle.planting_date, sowing)
         self.assertEqual(cycle.expected_harvest_date, sowing + timedelta(days=110))
+        self.assertEqual((cycle.season, cycle.year), ('wet' if 5 <= sowing.month <= 10 else 'dry', sowing.year))
 
     def test_a_new_guide_for_a_crop_being_worked_uses_its_sowing_day(self):
         cycle = self.start_cycle()
@@ -147,6 +149,31 @@ class PalayCheckGuideTests(TestCase):
         self.assertTrue(first['referenceUrl'].endswith('PalayCheck-System-2022-Revised-Edition.pdf'))
         self.assertTrue(first['explanation'])
         self.assertEqual(self.generate()['source'], 'SAVED')                       # built once
+
+    def test_the_season_is_named_from_the_sowing_day(self):
+        from datetime import date
+        self.assertEqual(season_label(date(2026, 7, 1)), 'Wet Season 2026')
+        self.assertEqual(season_label(date(2026, 11, 14)), 'Dry Season 2026-27')
+        self.assertEqual(season_label(date(2027, 2, 1)), 'Dry Season 2026-27')
+        sowing = timezone.now().date() + timedelta(days=palaycheck.PREP_DAYS)
+        self.assertEqual(self.generate()['season'], season_label(sowing))
+
+    def test_the_next_crop_of_the_variety_gets_a_new_guide(self):
+        first = self.generate()
+        GuideStep.objects.filter(guide_id=first['id']).update(is_completed=True)   # crop finished
+        second = self.generate()
+        self.assertNotEqual(second['id'], first['id'])
+        self.assertFalse(any(s['is_completed'] for s in second['steps']))
+        self.assertEqual(self.generate()['id'], second['id'])                       # then kept
+
+    def test_an_old_wet_season_guide_is_kept_and_named_by_its_dates(self):
+        guide_id = self.generate()['id']
+        PlantingGuide.objects.filter(pk=guide_id).update(season='Wet Season')
+        old_app = self.generate(season='Wet Season')            # what older app versions send
+        self.assertEqual(old_app['id'], guide_id)
+        self.assertNotEqual(old_app['season'], 'Wet Season')
+        self.assertEqual(self.generate()['id'], guide_id)
+        self.assertEqual(PlantingGuide.objects.filter(farm=self.farm).count(), 1)
 
     def test_a_new_guide_starts_with_seed_preparation_today(self):
         self.generate()
