@@ -58,6 +58,29 @@ class WeatherCacheTests(TestCase):
         self.assertEqual(retry['X-Cache'], 'MISS')
 
 
+class WeatherOutlookTests(TestCase):
+    """The rain and wind ahead that the planting guide's weather advice reads."""
+
+    def test_rain_and_wind_are_summed_from_the_current_hour(self):
+        from apps.environmental.views import weather_outlook
+        hourly = {
+            'precipitation':             [9, 1, 2, None] + [0.5] * 50,   # the first hour has passed
+            'precipitation_probability': [99, 40, 80, 10] + [20] * 50,
+            'wind_speed_10m':            [50, 10, 22.4, 5] + [3] * 50,
+        }
+        out = weather_outlook(hourly, start=1)
+        self.assertEqual(out['rain_mm_6h'], 1 + 2 + 0.5 * 3)
+        self.assertEqual(out['rain_prob_6h'], 80)
+        self.assertEqual(out['rain_mm_24h'], 1 + 2 + 0.5 * 21)
+        self.assertEqual(out['rain_mm_48h'], 1 + 2 + 0.5 * 45)
+        self.assertEqual(out['wind_kph_max_12h'], 22)
+
+    def test_no_hourly_data_means_no_rain(self):
+        from apps.environmental.views import weather_outlook
+        self.assertEqual(weather_outlook({}, 0)['rain_mm_24h'], 0)
+        self.assertEqual(weather_outlook({}, 0)['wind_kph_max_12h'], 0)
+
+
 @override_settings(CACHES=LOCMEM)
 class LocationCacheTests(TestCase):
     def setUp(self):

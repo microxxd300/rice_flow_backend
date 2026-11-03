@@ -645,6 +645,16 @@ GET https://doing-haven-requisite.ngrok-free.dev/api/environmental/weather/?lat=
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+Besides `current` and the next 8 `hourly` entries, the response has `outlook` (used by the planting guide's weather advice) and `fetched_at` (when the server got the forecast; it is cached for 10 minutes):
+
+```json
+"outlook": {
+  "rain_mm_6h": 0.0,  "rain_prob_6h": 20,
+  "rain_mm_24h": 0.6, "rain_prob_24h": 88,
+  "rain_mm_48h": 0.7, "rain_prob_48h": 88,
+  "wind_kph_max_12h": 7
+}
+```
 
 ---
 
