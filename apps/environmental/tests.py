@@ -62,6 +62,10 @@ class WeatherCacheTests(TestCase):
 class LocationCacheTests(TestCase):
     def setUp(self):
         cache.clear()
+        # These tests exercise SoilGrids: leave out the OpenLandMap file saved on this machine
+        olm = mock.patch('apps.environmental.services.soilgrids.openlandmap_values', return_value={})
+        olm.start()
+        self.addCleanup(olm.stop)
 
     @mock.patch('requests.get', return_value=fake_response({'properties': {'layers': [
         {'name': 'phh2o', 'depths': [{'label': '0-5cm', 'values': {'Q0.5': 64}}]}]}}))
@@ -78,7 +82,7 @@ class LocationCacheTests(TestCase):
         first = get_soil_data(7.3, 125.68)
         get_soil_data(7.3, 125.68)
 
-        self.assertFalse(first['from_soilgrids'])
+        self.assertFalse(first['measured'])
         self.assertEqual(get.call_count, 2)          # asked again: defaults are never kept
 
     def test_an_outage_is_skipped_for_ten_minutes_and_not_cached(self):
@@ -95,9 +99,9 @@ class LocationCacheTests(TestCase):
             first = get_soil_data(7.3, 125.68)
             calls = get.call_count
             second = get_soil_data(7.31, 125.69)       # another farm, same outage
-        self.assertFalse(first['from_soilgrids'])
+        self.assertFalse(first['measured'])
         self.assertEqual(first['ph'], 6.2)
-        self.assertFalse(second['from_soilgrids'])
+        self.assertFalse(second['measured'])
         self.assertEqual(get.call_count, calls)       # skipped: no wait on SoilGrids
         self.assertTrue(cache.get(soilgrids.OUTAGE_KEY))
 

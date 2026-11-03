@@ -5,6 +5,7 @@ import requests
 from django.core.cache import cache
 
 from .cache import cached_by_location
+from .openlandmap import openlandmap_values
 
 SOILGRIDS_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 # Same SoilGrids maps served one pixel at a time; used when the REST API is down
@@ -145,17 +146,20 @@ def _soilgrids_values(lat: float, lon: float) -> dict:
 
 
 def get_soil_data(lat: float, lon: float) -> dict:
-    """Soil at a point from SoilGrids, with defaults where it has no values or is down."""
-    props = {}
-    if not cache.get(OUTAGE_KEY):
-        try:
-            props = _soilgrids_values(lat, lon)
-        except requests.RequestException:
-            cache.set(OUTAGE_KEY, True, OUTAGE_TTL)
-        except NoSoilData:
-            pass
-    # SoilGrids has no values for built-up areas and water; the defaults below fill the gaps
-    from_soilgrids = any(v is not None for v in props.values())
+    """Soil at a point: OpenLandMap (2020-2022 maps saved for Panabo) first, then SoilGrids,
+    with defaults where neither has values."""
+    props, source = openlandmap_values(lat, lon), "openlandmap"
+    if not props:
+        source = "soilgrids"
+        if not cache.get(OUTAGE_KEY):
+            try:
+                props = _soilgrids_values(lat, lon)
+            except requests.RequestException:
+                cache.set(OUTAGE_KEY, True, OUTAGE_TTL)
+            except NoSoilData:
+                pass
+    # Neither has values for built-up areas and water; the defaults below fill the gaps
+    measured = any(v is not None for v in props.values())
 
     ph        = round((props.get("phh2o") or 62)  / 10, 1)   # SoilGrids pH×10; 62 = pH 6.2
     clay      = round((props.get("clay")  or 350) / 10, 1)   # g/kg → %
@@ -187,5 +191,6 @@ def get_soil_data(lat: float, lon: float) -> dict:
         "nitrogen_ppm":    nitrogen,
         "cec":             cec,
         "drainage":        "poorly drained" if clay > 35 else "moderately drained",
-        "from_soilgrids":  from_soilgrids,  # False: every value is a default, not a measurement
+        "measured":        measured,      # False: every value is a default, not from a soil map
+        "source":          source if measured else "default",
     }

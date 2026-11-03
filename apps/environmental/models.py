@@ -10,6 +10,9 @@ class EnvironmentalScan(models.Model):
     soil_texture       = models.CharField(max_length=50, blank=True)
     # BSWM soil series at the pin, e.g. "Cabangan clay loam"; its texture replaces SoilGrids'
     soil_series        = models.CharField(max_length=80, blank=True)
+    # Where pH, organic matter and the other soil values came from:
+    # 'openlandmap', 'soilgrids' or 'default' (no soil map had values)
+    soil_source        = models.CharField(max_length=20, blank=True)
     organic_matter     = models.FloatField(null=True, blank=True)
     drainage           = models.CharField(max_length=50, blank=True)
     cec                = models.FloatField(null=True, blank=True)

@@ -191,7 +191,7 @@ class ScanFarmView(APIView):
             soil, soil_sampling = combine_soil(soil_samples)
         else:
             soil = SOIL_FALLBACK
-            soil_sampling = {'points': 0, 'points_without_data': 0, 'estimated': True,
+            soil_sampling = {'points': 0, 'points_without_data': 0, 'estimated': True, 'source': 'default',
                              'ph_range': None, 'clay_pct_range': None, 'varies': False, 'message': ''}
 
         # BSWM's soil survey names the texture at the pin; it is measured, so it replaces
@@ -216,6 +216,7 @@ class ScanFarmView(APIView):
                 soil_ph=soil['ph'],
                 soil_texture=soil['texture'],
                 soil_series=series['description'] if series else '',
+                soil_source=soil_sampling['source'],
                 organic_matter=soil['organic_matter'],
                 drainage=soil['drainage'],
                 cec=soil['cec'],
