@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, wait
 import requests
 from django.db import IntegrityError
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -66,14 +67,17 @@ class WeatherForecastView(APIView):
                     'latitude':  lat,
                     'longitude': lng,
                     'current':   'temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m',
-                    'hourly':    'temperature_2m,weather_code,precipitation,precipitation_probability',
-                    'forecast_days': 2,
+                    'hourly':    'temperature_2m,weather_code,precipitation,precipitation_probability,'
+                                 'wind_speed_10m',
+                    'forecast_days': 3,     # the outlook looks 48 hours ahead
                     'timezone':  'Asia/Manila',
                 },
                 timeout=10,
             )
             r.raise_for_status()
-            return r.json()
+            data = r.json()
+            data['fetched_at'] = timezone.now().isoformat()
+            return data
 
         try:
             # 2 decimal places is about 1 km, finer than Open-Meteo's forecast grid
@@ -125,9 +129,26 @@ class WeatherForecastView(APIView):
                 'rain_pct':       round(rain_pct),
             },
             'hourly': next_hourly,
+            'outlook': weather_outlook(h, start_idx),
+            'fetched_at': data.get('fetched_at'),
         })
         response['X-Cache'] = 'HIT' if hit else 'MISS'
         return response
+
+
+def weather_outlook(hourly: dict, start: int) -> dict:
+    """Rain and wind ahead of the current hour, for the planting guide's weather advice:
+    total rain (mm) and highest rain chance (%) in the next 6, 24 and 48 hours, and the
+    strongest wind (km/h) in the next 12."""
+    def window(name, hours):
+        return [v for v in hourly.get(name, [])[start:start + hours] if v is not None]
+
+    out = {}
+    for hours in (6, 24, 48):
+        out[f'rain_mm_{hours}h'] = round(sum(window('precipitation', hours)), 1)
+        out[f'rain_prob_{hours}h'] = max(window('precipitation_probability', hours), default=0)
+    out['wind_kph_max_12h'] = round(max(window('wind_speed_10m', 12), default=0))
+    return out
 
 WEATHER_FALLBACK = {
     'avg_temperature': 27.0, 'temp_at_flowering': 27.0,
