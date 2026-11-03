@@ -95,17 +95,39 @@ def _chosen_result(rec, variety_pk):
         return None
 
 
-def _cycle_follows_pick(rec, variety):
-    """A scan starts the crop cycle with the top-ranked variety before the farmer picks
-    one. Once they pick another, that cycle follows: only the one this recommendation
-    started, and only while no field work is logged, so a real crop is never changed."""
-    cycle = rec.farm.farm_cycles.filter(status='active', created_at__gte=rec.created_at).first()
-    if (not cycle or cycle.variety_id == variety.id or cycle.progress_logs.exists()
-            or YieldRecord.objects.filter(farm_cycle=cycle).exists()):
+def _has_field_work(cycle) -> bool:
+    return cycle.progress_logs.exists() or YieldRecord.objects.filter(farm_cycle=cycle).exists()
+
+
+def _sowing_day(farm):
+    """The sowing day (start_date) of a new guide. A crop with field work logged keeps its
+    own date; otherwise it is far enough ahead that the first step (seed preparation)
+    falls on the day the guide is made."""
+    cycle = farm.farm_cycles.filter(status='active').first()
+    if cycle and _has_field_work(cycle):
+        return cycle.planting_date
+    return timezone.now().date() + timedelta(days=palaycheck.PREP_DAYS)
+
+
+def _cycle_follows_guide(rec, guide, picked=None):
+    """A scan starts the crop cycle (top-ranked variety, sown the day of the scan) before
+    there is a guide. Until field work is logged, that cycle follows the guide: the variety
+    the farmer picked and the guide's sowing day, so Progress, the guide and the logs count
+    the same days. Only the cycle this recommendation started, so a real crop is never changed."""
+    cycle = rec.farm.farm_cycles.filter(status='active', created_at__gte=rec.created_at) \
+        .select_related('variety').first()
+    if not cycle or _has_field_work(cycle):
+        return
+    variety = picked or cycle.variety
+    harvest = (guide.start_date + timedelta(days=int(variety.maturity_days))
+               if variety and variety.maturity_days else cycle.expected_harvest_date)
+    if (cycle.variety_id, cycle.planting_date, cycle.expected_harvest_date) == \
+            (variety and variety.id, guide.start_date, harvest):
         return
     cycle.variety = variety
-    cycle.expected_harvest_date = cycle.planting_date + timedelta(days=int(variety.maturity_days))
-    cycle.save(update_fields=['variety', 'expected_harvest_date'])
+    cycle.planting_date = guide.start_date
+    cycle.expected_harvest_date = harvest
+    cycle.save(update_fields=['variety', 'planting_date', 'expected_harvest_date'])
 
 
 # ── The view ───────────────────────────────────────────────────────────────────
@@ -134,19 +156,16 @@ class GeneratePlantingGuideView(APIView):
             return Response({'detail': "variety must be one of this recommendation's varieties."}, status=400)
 
         variety = chosen.variety
-        if request.data.get('variety') not in (None, ''):
-            _cycle_follows_pick(rec, variety)
         language = (request.data.get('language') or 'en').lower()
         if language not in VALID_GUIDE_LANGS:
             language = 'en'
 
-        # start_date is the sowing day: far enough ahead that the first step (seed
-        # preparation) falls on the day the guide is made
+        # start_date is the sowing day (day 0 of the guide)
         guide, _ = PlantingGuide.objects.get_or_create(
             farm=rec.farm, variety=variety, season=request.data.get('season', 'Wet Season'),
-            defaults={'start_date': timezone.now().date() + timedelta(days=palaycheck.PREP_DAYS),
-                      'language': language},
+            defaults={'start_date': _sowing_day(rec.farm), 'language': language},
         )
+        _cycle_follows_guide(rec, guide, variety if request.data.get('variety') not in (None, '') else None)
         # A guide from before PalayCheck (Gemini steps), or a new plan, gets the PalayCheck steps
         if request.data.get('force_regenerate') or not _is_palaycheck(guide):
             _build_steps(guide, variety)

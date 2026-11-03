@@ -77,6 +77,26 @@ class ChosenVarietyTests(TestCase):
         cycle.refresh_from_db()
         self.assertEqual(cycle.variety, self.top)
 
+    def test_the_scans_crop_cycle_is_sown_on_the_guides_sowing_day(self):
+        cycle = self.start_cycle()
+        res = self.client.post(self.generate_url, {}, format='json')
+        cycle.refresh_from_db()
+        sowing = timezone.now().date() + timedelta(days=palaycheck.PREP_DAYS)
+        self.assertEqual(res.data['start_date'], sowing.isoformat())
+        self.assertEqual(cycle.planting_date, sowing)
+        self.assertEqual(cycle.expected_harvest_date, sowing + timedelta(days=110))
+
+    def test_a_new_guide_for_a_crop_being_worked_uses_its_sowing_day(self):
+        cycle = self.start_cycle()
+        sown = timezone.now().date() - timedelta(days=20)
+        cycle.planting_date = sown
+        cycle.save()
+        ProgressLog.objects.create(farm_cycle=cycle, log_date=timezone.now().date(), observation='Sown')
+        res = self.client.post(self.generate_url, {}, format='json')
+        cycle.refresh_from_db()
+        self.assertEqual(res.data['start_date'], sown.isoformat())
+        self.assertEqual(cycle.planting_date, sown)
+
 
 class PalayCheckPlanTests(TestCase):
     """The guide is PalayCheck 2022, timed from sowing for the variety's maturity."""
