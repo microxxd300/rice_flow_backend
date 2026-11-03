@@ -42,6 +42,7 @@ STEPS = [
     ('harvest',     8, 'harvesting',      '53-55'),
     ('drystore',    9, 'harvesting',      '57-59'),
 ]
+PAGES = {key: pages for key, _, _, pages in STEPS}
 
 
 def _days(maturity: int) -> dict:

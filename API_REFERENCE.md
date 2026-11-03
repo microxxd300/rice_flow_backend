@@ -839,8 +839,9 @@ Content-Type: application/json
 ```
 
 `farm` is optional: the farm selected in the app. The answer uses that farm's scan, chosen
-variety, crop day, field logs, next guide steps and weather. Another user's farm is ignored
-(the newest of your own farms is used). `message` is at most 1000 characters.
+variety, crop day, field logs, the current PalayCheck guide step (its text and page, so the
+answer follows the book; later steps are not sent, to save tokens) and weather. Another user's
+farm is ignored (the newest of your own farms is used). `message` is at most 1000 characters.
 
 **Response:**
 ```json

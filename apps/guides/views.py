@@ -14,7 +14,6 @@ from apps.recommendations.models import Recommendation
 # The planting guide is PalayCheck 2022 (palaycheck.py), not generated text. The farmer works
 # through it one step at a time; a step is done when they log it (or tick it in Upcoming Tasks).
 VALID_GUIDE_LANGS = set(palaycheck.LANGUAGES)
-_PAGES = {key: pages for key, _, _, pages in palaycheck.STEPS}
 
 
 def _step_dict(st, language):
@@ -22,7 +21,7 @@ def _step_dict(st, language):
     (Gemini text, no template key) keep their saved text until the guide is rebuilt."""
     if st.template_key in palaycheck.TEXT:
         words = palaycheck.text(st.template_key, language)
-        ref = palaycheck.reference(_PAGES[st.template_key])
+        ref = palaycheck.reference(palaycheck.PAGES[st.template_key])
     else:
         words = {'title': st.title, 'instruction': st.description, 'explanation': ''}
         ref = ''
