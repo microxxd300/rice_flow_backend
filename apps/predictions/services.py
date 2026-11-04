@@ -11,7 +11,10 @@ Training data, in order of preference:
    seed type + ecosystem + season + municipality + barangay. Location names are
    target-encoded (each place's typical yield, fitted without leaking the row's
    own yield). It is tested on the newest season after training on the earlier ones.
-2. Real YieldRecord rows from the app once >= 30 exist.
+   The harvests farmers record in RiceFlow join it as rows of the same shape (dry palay
+   at 14% moisture over the area harvested; typos outside 1-15 t/ha left out), so each
+   recorded harvest teaches the model about Panabo. The headline test stays on DA rows.
+2. Without the CSV: real YieldRecord rows from the app once >= 30 exist.
 3. A synthetic dataset whose relationships follow documented rice agronomy
    (pH optimum around 6.2, stress above 33 °C, drought below ~1400 mm,
    waterlogging above ~2600 mm), with engineered features for those non-linear
@@ -142,13 +145,54 @@ def real_features(raw: dict) -> pd.DataFrame:
     }])
 
 
+# A recorded harvest outside this range is a typo (8,000 kg typed as 80,000), not a yield;
+# Davao del Norte farms usually get 3-7 t/ha
+APP_YIELD_RANGE = (1.0, 15.0)
+
+
+def dry_yield_kg(record) -> float:
+    """A harvest as dry palay at 14% moisture, the DA/PSA and NFA basis."""
+    if record.net_yield_kg:
+        return float(record.net_yield_kg)
+    moisture = record.moisture_pct or 14.0
+    return float(record.gross_yield_kg) * (100 - moisture) / (100 - 14)
+
+
+def app_harvest_rows() -> pd.DataFrame:
+    """The harvests farmers record in RiceFlow, as rows of the DA harvest report: Panabo
+    and the farm's barangay, the crop's season and harvest year, the farm's ecosystem, the
+    variety's seed type, and dry yield over the area harvested. Typos are left out."""
+    from apps.progress.models import YieldRecord
+
+    rows = []
+    for record in YieldRecord.objects.select_related('farm_cycle__farm', 'farm_cycle__variety'):
+        cycle, farm = record.farm_cycle, record.farm_cycle.farm
+        area = record.area_harvested_ha or 0
+        if area <= 0 or not farm.barangay:
+            continue
+        t_ha = dry_yield_kg(record) / 1000 / area
+        if not APP_YIELD_RANGE[0] <= t_ha <= APP_YIELD_RANGE[1]:
+            continue
+        rows.append({
+            'municipality': PANABO, 'barangay': farm.barangay,
+            'season': 'WS' if cycle.season == 'wet' else 'DS', 'harvest_year': record.harvest_date.year,
+            'ecosystem': farm.ecosystem, 'seed_type': seed_type_for(cycle.variety) if cycle.variety else 'Inbred',
+            'yield_t_ha': round(t_ha, 3),
+        })
+    return pd.DataFrame(rows, columns=REAL_COLUMNS + ['harvest_year', 'yield_t_ha'])
+
+
 def _load_real_rows(csv_path: str):
-    """The harvest-report CSV → (features, yield t/ha, season label, season order)."""
+    """The DA harvest-report CSV plus RiceFlow's own harvests → (features, yield t/ha,
+    season label, season order, source 'da' or 'app' per row)."""
     df = pd.read_csv(csv_path)
     missing = set(REAL_COLUMNS + ['harvest_year', 'yield_t_ha']) - set(df.columns)
     if missing:
         raise ValueError(f'{csv_path} is missing columns: {", ".join(sorted(missing))}')
-    df = df.dropna(subset=REAL_COLUMNS + ['harvest_year', 'yield_t_ha'])
+    df = df.dropna(subset=REAL_COLUMNS + ['harvest_year', 'yield_t_ha']).assign(source='da')
+    app = app_harvest_rows()
+    if len(app):
+        df = pd.concat([df, app.assign(source='app')], ignore_index=True)
 
     X = pd.DataFrame({
         'ecosystem':    df['ecosystem'].map(lambda e: REAL_ECOSYSTEM.get(str(e).lower(), 'irrigated')),
@@ -162,7 +206,7 @@ def _load_real_rows(csv_path: str):
     label = np.array([f'{"Wet" if s == "WS" else "Dry"} {yr}' for s, yr in zip(X['season'], years)])
     # A wet season (May–Oct) ends after the dry season (Nov–Apr) of the same harvest year
     order = years * 2 + (X['season'] == 'WS').to_numpy()
-    return X, y, label, order
+    return X, y, label, order, df['source'].to_numpy()
 
 
 def _real_pipeline() -> Pipeline:
@@ -176,13 +220,17 @@ def _real_pipeline() -> Pipeline:
 
 
 def _train_real(csv_path: str) -> dict:
-    X, y, label, order = _load_real_rows(csv_path)
-    if len(np.unique(order)) < 2:
+    X, y, label, order, source = _load_real_rows(csv_path)
+    da = source == 'da'
+    if len(np.unique(order[da])) < 2:
         raise ValueError('The harvest data needs at least two seasons to test on a new one.')
 
-    # Headline test: train on the earlier seasons, predict the newest one
-    newest = order == order.max()
-    pipe = _real_pipeline().fit(X[~newest], y[~newest])
+    # Headline test: train on the earlier seasons, predict the newest DA season (DA rows
+    # only, so the score stays comparable as RiceFlow harvests come in)
+    test_order = order[da].max()
+    newest  = da & (order == test_order)
+    earlier = order < test_order
+    pipe = _real_pipeline().fit(X[earlier], y[earlier])
     pred = pipe.predict(X[newest])
     r2   = float(r2_score(y[newest], pred))
     mae  = float(mean_absolute_error(y[newest], pred))
@@ -205,12 +253,13 @@ def _train_real(csv_path: str) -> dict:
         'r2_score':         round(r2, 4),
         'mae':              round(mae, 4),
         'rmse':             round(rmse, 4),
-        'training_samples': int((~newest).sum()),
+        'training_samples': int(earlier.sum()),
         'model_file':       str(path),
         'is_active':        True,
         'notes':            (
-            f'Trained on DA Davao del Norte harvest reports ({len(y)} rows, '
-            f'{len(np.unique(order))} seasons, {X["barangay"].nunique()} barangays). '
+            f'Trained on DA Davao del Norte harvest reports ({int(da.sum())} rows) and '
+            f'{int((~da).sum())} harvests recorded in RiceFlow ({len(np.unique(order))} seasons, '
+            f'{X["barangay"].nunique()} barangays). '
             f'Inputs: seed type, ecosystem, season, municipality, barangay. '
             f'Test = {label[newest][0]} after training on earlier seasons. '
             f'Leave-one-season-out R2 = {loso_r2:.4f}, MAE = {loso_mae:.4f} t/ha. '
@@ -285,8 +334,9 @@ def _get_real_training_data():
         scan  = EnvironmentalScan.objects.filter(farm=farm).order_by('-id').first()
         if not scan:
             continue
-        area = float(farm.area_ha or 1.0) if hasattr(farm, 'area_ha') else float(getattr(farm, 'area_hectares', 1.0) or 1.0)
-        y_t_ha = (yr.net_yield_kg / 1000) / max(area, 0.1)
+        # The land actually harvested, not the whole farm (the DA's yield per area harvested)
+        area = float(yr.area_harvested_ha or farm.area_hectares or 1.0)
+        y_t_ha = (dry_yield_kg(yr) / 1000) / max(area, 0.1)
         X_rows.append([
             area,
             float(scan.soil_ph),
