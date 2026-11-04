@@ -819,6 +819,20 @@ Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
 
+### Answer "Did you sow already?"
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/guides/{guide_id}/sowing/
+Authorization: Bearer <TOKEN>
+ngrok-skip-browser-warning: true
+Content-Type: application/json
+
+{ "sown": true, "date": "2026-11-12", "language": "en" }
+```
+- `"sown": true`: sown on `date` (default today; not in the future, at most 150 days ago). The guide's sowing day moves there, every step not done yet moves with it, the steps up to sowing count as done, a sowing log is saved, and the farm's active cycle gets that planting date and harvest date.
+- `"sown": false`: not yet. Sowing moves 3 days later (from today or the planned day); `400` if sowing is already logged.
+
+Returns the guide, like the generate endpoint. Logging the sowing step (`guide_step` = the "seedbed" step) does the same as `"sown": true` on the log date.
+
 ---
 
 ## 🤖 AI Chat (Gemini) — `apps/ai/`
@@ -953,6 +967,7 @@ GET https://doing-haven-requisite.ngrok-free.dev/api/progress/cycles/?farm_id={f
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+Each cycle has `stage` (`{"stage_no": 3, "name": "Tillering"}`): today's stage, from the days since sowing or the planting-guide steps logged, whichever is further along. `current_stage` is the stage saved when the cycle started.
 
 ### Create a farm cycle
 ```
@@ -1003,6 +1018,7 @@ Content-Type: application/json
 }
 ```
 - `guide_step` (optional) is the planting guide step this log finishes; saving the log marks that step done. It must be a step of the cycle's farm (otherwise `400`)
+- Logging a step after sowing before sowing was logged returns `sowing_estimate` (the sowing day that step implies, e.g. transplanting minus 21 days) for the app to confirm
 - `growth_stage` is a GrowthStage id from `GET /api/varieties/growth-stages/` (optional)
 - `issue_type`: `pest`, `disease`, `weather`, `nutrient`, `other`, or `""` for none
 - `severity`: `low`, `medium`, `high`, or `""`
