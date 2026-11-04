@@ -116,6 +116,17 @@ class SowingTests(TestCase):
         cycle = (cycle['results'] if isinstance(cycle, dict) else cycle)[0]
         self.assertEqual(cycle['stage']['name'], 'Tillering')
 
+    def test_the_admin_cycle_list_follows_the_app_too(self):
+        sown = self.today - timedelta(days=4)
+        self.answer(sown=True, date=str(sown))
+        self.log('fertilizer1', self.today)
+        admin = APIClient()
+        admin.force_authenticate(User.objects.create_user(username='admin', password='pass12345', is_staff=True))
+        row = next(c for c in admin.get('/api/progress/admin/cycles/').json() if c['id'] == self.cycle.id)
+        self.assertEqual((row['current_stage'], row['stage_no']), ('Tillering', 3))
+        self.assertEqual(row['planting_date'], sown.isoformat())
+        self.assertEqual(row['expected_harvest_date'], (sown + timedelta(days=113)).isoformat())
+
     def test_without_logs_the_stage_still_moves_with_time(self):
         self.answer(sown=True, date=str(self.today - timedelta(days=50)))
         cycle = self.client.get('/api/progress/cycles/').json()
