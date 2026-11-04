@@ -78,6 +78,42 @@ class RealHarvestModelTests(TestCase):
         self.assertEqual(result['model_used'], 'Linear Regression')
         self.assertTrue(3.0 < result['predicted_yield_t_ha'] < 6.5)
 
+    def record_harvest(self, barangay='Nanyo', net_kg=6000.0, area=1.0, season='wet', year=2026):
+        from datetime import date
+        from apps.progress.models import FarmCycle, YieldRecord
+        user = User.objects.create_user(username=f'farmer{YieldRecord.objects.count()}', password='pass12345')
+        farm = Farm.objects.create(user=user, name='F', barangay=barangay, latitude=7.34, longitude=125.64,
+                                   area_hectares=2.0, ecosystem='irrigated_lowland')
+        variety = RiceVariety.objects.create(variety_id=f'V{YieldRecord.objects.count()}', nsic_code='NSIC Rc222',
+                                             common_name='Tubigan 18', ecosystem='irrigated_lowland', season='both',
+                                             maturity_days=113, avg_yield_t_ha=5.2, max_yield_t_ha=8)
+        cycle = FarmCycle.objects.create(farm=farm, variety=variety, season=season, year=year,
+                                         planting_date=date(year, 6, 1), status='completed')
+        return YieldRecord.objects.create(farm_cycle=cycle, harvest_date=date(year, 9, 25), area_harvested_ha=area,
+                                          gross_yield_kg=net_kg, net_yield_kg=net_kg)
+
+    def test_recorded_harvests_become_rows_like_the_da_reports(self):
+        self.record_harvest(net_kg=6000, area=1.2)
+        self.record_harvest(net_kg=90000, area=1.0)                 # a typo: 90 t/ha
+        self.record_harvest(net_kg=0, area=1.0).__class__.objects.filter(net_yield_kg=0).update(
+            gross_yield_kg=5000, moisture_pct=22.0)                 # fresh palay, no dry weight
+        rows = services.app_harvest_rows()
+        self.assertEqual(len(rows), 2)
+        first = rows.iloc[0].to_dict()
+        self.assertEqual({k: first[k] for k in ('municipality', 'barangay', 'season', 'harvest_year',
+                                                 'ecosystem', 'seed_type')},
+                         {'municipality': 'city of panabo', 'barangay': 'Nanyo', 'season': 'WS',
+                          'harvest_year': 2026, 'ecosystem': 'irrigated_lowland', 'seed_type': 'Inbred'})
+        self.assertAlmostEqual(first['yield_t_ha'], 5.0, places=2)    # 6,000 kg over the 1.2 ha harvested
+        self.assertAlmostEqual(rows.iloc[1]['yield_t_ha'], 5000 * 78 / 86 / 1000, places=2)   # dried to 14%
+
+    def test_recorded_harvests_train_the_model_but_not_its_test(self):
+        for _ in range(3):
+            self.record_harvest(net_kg=7500, area=1.0)
+        result = self.train(csv_path=str(self.csv))
+        self.assertIn('and 3 harvests recorded in RiceFlow', result['notes'])
+        self.assertIn('Test = Wet 2025', result['notes'])             # the test stays on DA rows
+
     @override_settings(YIELD_TRAINING_CSV='')
     def test_without_the_csv_it_trains_the_synthetic_model(self):
         result = self.train()
