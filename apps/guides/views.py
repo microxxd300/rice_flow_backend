@@ -1,11 +1,12 @@
 from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from . import palaycheck
+from . import palaycheck, sowing
 from .models import PlantingGuide, GuideStep
 from .serializers import PlantingGuideSerializer, GuideStepSerializer
 from apps.progress.models import YieldRecord
@@ -109,15 +110,7 @@ def _sowing_day(farm):
 
 
 LEGACY_SEASONS = ('Wet Season', 'Dry Season')
-
-
-def season_label(sowing) -> str:
-    """The cropping season a sowing day falls in (DA, Davao del Norte): 'Wet Season 2026'
-    (May-October) or 'Dry Season 2026-27' (November-April)."""
-    if 5 <= sowing.month <= 10:
-        return f'Wet Season {sowing.year}'
-    start = sowing.year if sowing.month >= 11 else sowing.year - 1
-    return f'Dry Season {start}-{str(start + 1)[-2:]}'
+season_label = sowing.season_label
 
 
 def _crop_is_over(guide) -> bool:
@@ -221,6 +214,44 @@ class GeneratePlantingGuideView(APIView):
             guide.language = language
             guide.save(update_fields=['language'])
         return Response(_guide_response(guide, source, language))
+
+
+class SowingView(APIView):
+    """The farmer's answer to "Did you sow already?" (see sowing.py).
+
+    POST body: {"sown": true, "date": "2026-11-12", "language": "en"}  (date: default today)
+           or  {"sown": false}                                       (not yet: 3 days later)
+    Returns the guide, moved to the answer.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, guide_id):
+        guide = (PlantingGuide.objects.select_related('farm', 'variety')
+                 .filter(pk=guide_id, farm__user=request.user).first())
+        if not guide:
+            return Response({'detail': 'Guide not found.'}, status=404)
+        language = (request.data.get('language') or 'en').lower()
+        if language not in VALID_GUIDE_LANGS:
+            language = 'en'
+
+        sown = str(request.data.get('sown')).lower()
+        if sown == 'true':
+            raw = request.data.get('date')
+            sown_on = parse_date(str(raw)) if raw else timezone.localdate()
+            if not sown_on:
+                return Response({'date': 'Use YYYY-MM-DD.'}, status=400)
+            problem = sowing.check_sowing_date(sown_on)
+            if problem:
+                return Response({'date': problem}, status=400)
+            sowing.confirm_sowing(guide, sown_on)
+        elif sown == 'false':
+            if sowing.is_sown(guide):
+                return Response({'detail': 'Sowing is already logged.'}, status=400)
+            sowing.postpone_sowing(guide)
+        else:
+            return Response({'sown': 'Send true or false.'}, status=400)
+        guide.refresh_from_db()
+        return Response(_guide_response(guide, 'SAVED', language))
 
 
 class PlantingGuideListView(ListAPIView):

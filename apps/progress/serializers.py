@@ -3,10 +3,12 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+from apps.guides import sowing
 from apps.guides.models import GuideStep
 from apps.farms.models import Farm
 from apps.varieties.models import GrowthStage
 from .models import FarmCycle, ProgressLog, YieldRecord
+from .stages import stage_today
 
 
 # Writable foreign keys only accept the requesting user's own records, so a farmer
@@ -31,6 +33,8 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     farm = OwnFarmField()
     yield_per_ha = serializers.SerializerMethodField()
     variety_name = serializers.CharField(source='variety.common_name', read_only=True, default=None)
+    # Today's stage (age or logged guide steps, see stages.py); current_stage is the saved one
+    stage = serializers.SerializerMethodField()
 
     class Meta:
         model = FarmCycle
@@ -39,6 +43,10 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     def get_yield_per_ha(self, obj):
         yr = getattr(obj, 'yield_record', None)
         return yr.yield_per_ha if yr else None
+
+    def get_stage(self, obj):
+        stage = stage_today(obj)
+        return {'stage_no': stage.stage_no, 'name': stage.name} if stage else None
 
     def validate(self, attrs):
         # One active season per farm: the progress screens and the recommendation
@@ -89,7 +97,20 @@ class ProgressLogSerializer(serializers.ModelSerializer):
             step.is_completed = True
             step.completed_at = timezone.now()
             step.save(update_fields=['is_completed', 'completed_at'])
+        if step and step.template_key == sowing.SOWING_KEY:
+            # The sowing log is the real sowing day: the whole plan moves to it
+            sowing.confirm_sowing(step.guide, log.log_date, log=log)
+        else:
+            # A later step logged before sowing was: the app asks to confirm this day
+            log.sowing_estimate = sowing.sowing_estimate(step, log.log_date)
         return log
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        estimate = getattr(instance, 'sowing_estimate', None)
+        if estimate:
+            data['sowing_estimate'] = estimate.isoformat()
+        return data
 
 
 class YieldRecordSerializer(serializers.ModelSerializer):
