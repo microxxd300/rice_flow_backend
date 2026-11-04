@@ -20,6 +20,15 @@ NOT_YET_DAYS = 3
 OLDEST_SOWING_DAYS = 150   # a sowing date further back is a typo, not this crop
 
 
+def season_label(sowing) -> str:
+    """The cropping season a sowing day falls in (DA, Davao del Norte): 'Wet Season 2026'
+    (May-October) or 'Dry Season 2026-27' (November-April)."""
+    if 5 <= sowing.month <= 10:
+        return f'Wet Season {sowing.year}'
+    start = sowing.year if sowing.month >= 11 else sowing.year - 1
+    return f'Dry Season {start}-{str(start + 1)[-2:]}'
+
+
 def sowing_step(guide):
     return guide.steps.filter(template_key=SOWING_KEY).first()
 
@@ -34,9 +43,11 @@ def active_cycle(guide):
 
 
 def _replan(guide, sowing):
-    """Move the plan to a new sowing day: the steps not done yet, and the crop cycle."""
+    """Move the plan to a new sowing day: the steps not done yet, the season it is named
+    for (sowing on Nov 1 instead of Oct 30 is the dry season), and the crop cycle."""
     guide.start_date = sowing
-    guide.save(update_fields=['start_date'])
+    guide.season = season_label(sowing)
+    guide.save(update_fields=['start_date', 'season'])
     steps = list(guide.steps.filter(is_completed=False))
     for st in steps:
         st.scheduled_date = sowing + timedelta(days=st.days_after_planting or 0)

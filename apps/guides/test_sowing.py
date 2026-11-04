@@ -14,7 +14,7 @@ from apps.recommendations.models import Recommendation
 from apps.varieties.models import GrowthStage
 
 from .models import GuideStep, PlantingGuide
-from .sowing import NOT_YET_DAYS
+from .sowing import NOT_YET_DAYS, season_label
 from .tests import make_variety
 
 # The seeded growth stages: (stage_no, name, first paddy day)
@@ -62,6 +62,7 @@ class SowingTests(TestCase):
         res = self.answer(sown=True, date=str(sown))
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data['start_date'], sown.isoformat())
+        self.assertEqual(res.data['season'], season_label(sown))          # renamed with the day
         self.assertEqual(self.step('transplant').scheduled_date, sown + timedelta(days=21))
         for key in ('seeds', 'plow', 'seedbed'):                      # up to sowing counts as done
             self.assertTrue(self.step(key).is_completed, key)

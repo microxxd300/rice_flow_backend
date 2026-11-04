@@ -110,15 +110,7 @@ def _sowing_day(farm):
 
 
 LEGACY_SEASONS = ('Wet Season', 'Dry Season')
-
-
-def season_label(sowing) -> str:
-    """The cropping season a sowing day falls in (DA, Davao del Norte): 'Wet Season 2026'
-    (May-October) or 'Dry Season 2026-27' (November-April)."""
-    if 5 <= sowing.month <= 10:
-        return f'Wet Season {sowing.year}'
-    start = sowing.year if sowing.month >= 11 else sowing.year - 1
-    return f'Dry Season {start}-{str(start + 1)[-2:]}'
+season_label = sowing.season_label
 
 
 def _crop_is_over(guide) -> bool:
