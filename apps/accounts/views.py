@@ -487,6 +487,17 @@ class SystemHealthView(APIView):
         })
 
 
+class AdminSeasonView(APIView):
+    """GET /api/auth/admin-season/: crops per growth stage and the farms that need attention
+    (late guide steps, problems logged this week, flagged pins, harvests not recorded).
+    For both staff roles: the validator acts on it."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from .season_board import season_board
+        return Response(season_board())
+
+
 class AdminStatsView(APIView):
     """GET /api/auth/admin-stats/ — dashboard KPIs for the admin panel."""
     permission_classes = [IsAdminUser]
