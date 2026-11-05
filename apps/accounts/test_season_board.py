@@ -83,6 +83,8 @@ class SeasonBoardTests(TestCase):
 
     def test_flagged_pins_and_overdue_harvests(self):
         self.crop('OnRoad', 5, location_flag='built_up', location_confirmed=True)
+        self.crop('GoodPin', 5, location_flag='ok')
+        self.crop('NotChecked', 5, location_flag='unchecked')
         overdue = self.crop('Overdue', 113 + HARVEST_GRACE_DAYS)
         done = self.crop('Harvested', 113 + HARVEST_GRACE_DAYS)
         YieldRecord.objects.create(farm_cycle=done, harvest_date=self.today, area_harvested_ha=1,

@@ -23,6 +23,8 @@ LATE_DAYS = 3
 PROBLEM_WINDOW_DAYS = 7
 HARVEST_GRACE_DAYS = 7
 LIST_LIMIT = 8
+# The location check's problems (farms/location_check.py), as stored on Farm.location_flag
+PIN_PROBLEMS = ('on_building', 'built_up', 'water', 'mangrove')
 
 
 def _farmer(farm):
@@ -81,8 +83,9 @@ def season_board(today=None):
     ]
 
     # Pins the location check flagged (the farmer may have kept them anyway)
+    # (location_flag is the problem found, or 'ok' / 'unchecked' / 'warning' when there is none)
     pins = [_row(f, flag=f.location_flag, kept=f.location_confirmed)
-            for f in Farm.objects.filter(is_active=True).exclude(location_flag='').select_related('user')]
+            for f in Farm.objects.filter(is_active=True, location_flag__in=PIN_PROBLEMS).select_related('user')]
 
     # Crops past their harvest date with no harvest recorded
     overdue = []
