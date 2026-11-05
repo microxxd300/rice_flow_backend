@@ -2,7 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenBlacklistView
 from .views import (
     RegisterView, LoginView, ProfileView,
-    AdminUserListView, AdminUserDetailView, AdminStatsView, SystemHealthView,
+    AdminUserListView, AdminUserDetailView, AdminStatsView, AdminSeasonView, SystemHealthView,
 )
 
 urlpatterns = [
@@ -14,5 +14,6 @@ urlpatterns = [
     path('users/',        AdminUserListView.as_view(),   name='admin-users'),
     path('users/<int:pk>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
     path('admin-stats/',  AdminStatsView.as_view(),      name='admin-stats'),
+    path('admin-season/', AdminSeasonView.as_view(),     name='admin-season'),
     path('system-health/', SystemHealthView.as_view(),   name='system-health'),
 ]

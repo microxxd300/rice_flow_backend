@@ -539,6 +539,30 @@ Admin only (a validator gets `403`): `/api/auth/users/` (list, create, edit, del
 Farmer emails (`owner_email` in `/api/farms/all/` and `/api/progress/admin/cycles/`) are `null`
 for a validator: contact details are for the admin only (Data Privacy Act).
 
+### Season board (both roles)
+```
+GET /api/auth/admin-season/
+Authorization: Bearer <TOKEN>
+```
+The dashboard's season board: active crops at each of the 10 growth stages (by the crop's age
+or its logged steps), and four lists of farms that need attention. Each list has a `count` and
+up to 8 `items`, worst first; rows carry `farm_id`, `farm`, `farmer` (name, no email), `barangay`.
+```json
+{
+  "active_crops": 17,
+  "stages": [{ "stage_no": 1, "name": "Germination & Seedling", "count": 4 }, …],
+  "attention": {
+    "late_steps":      { "count": 2, "items": [{ "step": "Level the field", "due": "2026-11-01", "days_late": 4, … }] },
+    "problems":        { "count": 1, "items": [{ "issue": "pest", "issue_label": "Pest", "severity": "high", "date": "2026-11-04", "note": "…", … }] },
+    "flagged_pins":    { "count": 3, "items": [{ "flag": "built_up", "kept": true, … }] },
+    "harvest_overdue": { "count": 0, "items": [] }
+  }
+}
+```
+Late = the current PalayCheck step is 3+ days past its date. Problems = logs with an issue in the
+last 7 days. Flagged pins = the location check said road, building, water or mangrove (`kept`:
+the farmer kept the pin anyway). Overdue = 7+ days past the expected harvest with no yield record.
+
 ---
 
 ## 🌾 Farms (`apps/farms/`)
