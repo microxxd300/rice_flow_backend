@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'apps.predictions',
     'apps.ai',
     'apps.activity',
+    'apps.advice',
 ]
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')

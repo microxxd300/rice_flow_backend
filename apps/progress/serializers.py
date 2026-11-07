@@ -82,11 +82,22 @@ class ProgressLogSerializer(serializers.ModelSerializer):
         model = ProgressLog
         fields = '__all__'
 
+    def validate_problem_key(self, value):
+        from apps.advice.knowledge import PROBLEMS
+        if value and value not in PROBLEMS:
+            raise serializers.ValidationError('Unknown problem.')
+        return value
+
     def validate(self, attrs):
         step = attrs.get('guide_step')
         cycle = attrs.get('farm_cycle', getattr(self.instance, 'farm_cycle', None))
         if step and cycle and step.guide.farm_id != cycle.farm_id:
             raise serializers.ValidationError({'guide_step': "This step is not in this farm's planting guide."})
+        # A problem picked from the advice list also fills the problem type
+        problem = attrs.get('problem_key')
+        if problem and not attrs.get('issue_type'):
+            from apps.advice.knowledge import PROBLEMS
+            attrs['issue_type'] = PROBLEMS[problem]['category']
         return attrs
 
     def create(self, validated_data):

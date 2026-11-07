@@ -50,6 +50,8 @@ class ProgressLog(models.Model):
     observation   = models.TextField()
     issue_type    = models.CharField(max_length=15, choices=ISSUE_CHOICES, blank=True)
     severity      = models.CharField(max_length=10, choices=SEVERITY_CHOICES, blank=True)
+    # Which problem from the advice list (apps/advice/knowledge.py), e.g. 'stem_borer'
+    problem_key   = models.CharField(max_length=40, blank=True)
     action_taken  = models.TextField(blank=True)
     photo_url     = models.URLField(blank=True)
     # The planting-guide step this log records; saving the log marks the step done (the
