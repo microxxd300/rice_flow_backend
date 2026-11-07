@@ -21,6 +21,9 @@ Training data, in order of preference:
    effects. Validation: 5-fold CV on the training split plus held-out R², MAE, RMSE.
 """
 import os
+import uuid
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import joblib
@@ -115,6 +118,13 @@ REAL_ECOSYSTEM   = {
     'rainfed_lowland': 'rainfed_lowland', 'rainfed': 'rainfed_lowland',
     'upland': 'upland', 'highland': 'upland',
 }
+
+
+def new_model_path() -> Path:
+    """A file of its own for each training, so older models (kept for their saved
+    predictions) are never overwritten."""
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    return MODELS_DIR / f'yield_linear_{stamp}_{uuid.uuid4().hex[:6]}.pkl'
 
 
 def _place(name) -> str:
@@ -245,7 +255,7 @@ def _train_real(csv_path: str) -> dict:
 
     # Serve the model fitted on every season
     final = _real_pipeline().fit(X, y)
-    path = MODELS_DIR / 'yield_linear.pkl'
+    path = new_model_path()
     joblib.dump({'kind': 'real', 'pipeline': final}, path)
 
     return {
@@ -398,7 +408,7 @@ def train_all_models(csv_path: str | None = None):
     mae  = float(mean_absolute_error(y_test, y_pred))
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
-    path = MODELS_DIR / 'yield_linear.pkl'
+    path = new_model_path()
     joblib.dump(pipe, path)
 
     return [{
@@ -450,6 +460,7 @@ def predict_yield(features: dict) -> dict:
             'predicted_yield_t_ha': round(max(1.0, min(pred, 12.0)), 2),
             'model_used':           active.get_model_type_display(),
             'r2_score':             active.r2_score,
+            'model_id':             active.id,
         }
 
     X = engineer_features(encode_features(features))
@@ -479,4 +490,56 @@ def predict_yield(features: dict) -> dict:
         'predicted_yield_t_ha': round(pred, 2),
         'model_used':           active.get_model_type_display(),
         'r2_score':             active.r2_score,
+        'model_id':             active.id,
     }
+
+
+# ── Saved predictions ────────────────────────────────────────────────────────
+
+def fill_features(features: dict, farm=None, variety=None) -> dict:
+    """Fill in what the models need from the farm (barangay, ecosystem) and the variety
+    (seed type, maturity, average yield) where the request didn't send them."""
+    if farm:
+        features.setdefault('barangay', farm.barangay)
+        features.setdefault('ecosystem', farm.ecosystem)
+    if variety:
+        features.setdefault('seed_type', seed_type_for(variety))
+        features.setdefault('maturity_days', variety.maturity_days)
+        features.setdefault('variety_avg_yield', variety.avg_yield_t_ha)
+    return features
+
+
+def features_for_cycle(cycle) -> dict:
+    """A crop's model inputs: its farm, variety and season, plus the farm's latest scan
+    (the older soil-and-climate model reads those)."""
+    farm = cycle.farm
+    scan = farm.scans.order_by('-scanned_at', '-id').first()
+    features = {
+        'season':  cycle.season,
+        'area_ha': cycle.area_planted_ha or float(farm.area_hectares or 1),
+    }
+    if scan:
+        for key, value in (('soil_ph', scan.soil_ph), ('organic_matter', scan.organic_matter),
+                           ('avg_temperature', scan.avg_temperature),
+                           ('seasonal_rainfall', scan.seasonal_rainfall_mm),
+                           ('humidity', scan.humidity_pct), ('elevation_m', scan.elevation_m),
+                           ('flood_risk', scan.flood_risk)):
+            if value is not None:
+                features[key] = value
+    return fill_features(features, farm, cycle.variety)
+
+
+def save_prediction(cycle, result: dict):
+    """Keep a prediction for a crop that has not been harvested yet: one row per crop
+    per model, updated when it is asked again. A prediction made after the harvest is
+    recorded is not saved, so every saved one can be compared with the harvest fairly."""
+    from apps.predictions.models import YieldPrediction, YieldPredictionModel
+
+    if cycle is None or hasattr(cycle, 'yield_record'):
+        return None
+    model = YieldPredictionModel.objects.filter(pk=result.get('model_id')).first()
+    prediction, _ = YieldPrediction.objects.update_or_create(
+        farm_cycle=cycle, model=model,
+        defaults={'predicted_t_ha': result['predicted_yield_t_ha']},
+    )
+    return prediction
