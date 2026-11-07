@@ -885,9 +885,23 @@ farm is ignored (the newest of your own farms is used). `message` is at most 100
 ```json
 {
   "reply":    "Your Tubigan 18 is on day 28 (tillering), so apply about 1.5 bags of urea per hectare...",
-  "language": "en"
+  "language": "en",
+  "grounded": true,
+  "sources":  [{"title": "PalayCheck System for Irrigated Lowland Rice (2022 revised edition)",
+                "publisher": "PhilRice", "pages": "p. 38", "url": "https://..."}]
 }
 ```
+
+**Booklet search (RAG).** With `GEMINI_FILE_SEARCH_STORE` set, GeoRice AI first searches the
+DA-PhilRice booklets (PalayCheck 2022, Key Check 7, the field guide, the disease, snail and
+pest handouts; `apps/ai/booklets.py`) with Gemini File Search, using the Flash-Lite models
+that support it, and answers from what it finds. `sources` lists the booklet parts the
+answer used (at most 4), with the printed page (`p. 48`), slide (`slide 15`) or `chart`;
+`grounded` is `true` when there is at least one. If the search fails, the chat answers
+without it (`grounded: false`, `sources: []`). A reply naming a pesticide is replaced by
+advice to ask an agriculturist. The booklets are uploaded once with
+`python manage.py load_booklets --dir <folder with the PDFs>`, which prints the store name
+for `.env`; indexing costs about $0.02 and storage and search are free.
 
 | Status | When |
 |---|---|
@@ -995,8 +1009,10 @@ Content-Type: application/json
 
 { "problem": "stem_borer", "language": "ceb", "farm": 12, "question": "Unsay akong buhaton karon?" }
 ```
-`farm` and `question` are optional. The farm's stage, current guide step and weather come
-from the same summary the chat uses.
+`farm`, `question` and `log` are optional. The farm's stage, current guide step and weather
+come from the same summary the chat uses. With `log` (the id of the farmer's own problem
+log), the log's observation is the question, and a checked answer is saved on the log
+(`advice_tip`): the problem card under the planting guide asks the AI only once per problem.
 ```json
 {
   "problem": "stem_borer", "ai_used": true, "not_covered": false, "note": null,
@@ -1011,6 +1027,9 @@ With no checked answer, `points` is `[]`, `ai_used` is `false` and `note` says w
 ### Field logs name the problem
 `POST /api/progress/logs/` takes an optional `problem_key` (a key from the list above).
 It fills `issue_type` from the problem when that is empty; an unknown key is a `400`.
+`PATCH /api/progress/logs/{id}/` with `{"resolved_at": "<ISO time>"}` marks the problem
+fixed ("Okay na"): its card leaves the Guide tab and the admin season board. `advice_tip`
+is read-only (written by the explain endpoint).
 
 ---
 

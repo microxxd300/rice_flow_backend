@@ -52,6 +52,10 @@ class ProgressLog(models.Model):
     severity      = models.CharField(max_length=10, choices=SEVERITY_CHOICES, blank=True)
     # Which problem from the advice list (apps/advice/knowledge.py), e.g. 'stem_borer'
     problem_key   = models.CharField(max_length=40, blank=True)
+    # The farmer tapped "the problem is fixed": its card leaves the Guide tab
+    resolved_at   = models.DateTimeField(null=True, blank=True)
+    # GeoRice AI's tip for this problem on this farm, saved so it is asked only once
+    advice_tip    = models.JSONField(null=True, blank=True)
     action_taken  = models.TextField(blank=True)
     photo_url     = models.URLField(blank=True)
     # The planting-guide step this log records; saving the log marks the step done (the

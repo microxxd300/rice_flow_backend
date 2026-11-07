@@ -81,6 +81,7 @@ class ProgressLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProgressLog
         fields = '__all__'
+        read_only_fields = ['advice_tip']   # written by the advice explain endpoint
 
     def validate_problem_key(self, value):
         from apps.advice.knowledge import PROBLEMS

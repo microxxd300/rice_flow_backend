@@ -183,6 +183,12 @@ REST_FRAMEWORK = {
 # app, so one farmer can't use it all up. Saved (reused) answers don't count.
 AI_CHAT_DAILY_LIMIT = int(os.getenv('AI_CHAT_DAILY_LIMIT', '15'))
 
+# GeoRice AI reads the PhilRice / PalayCheck booklets before answering (Gemini File
+# Search). The store is made by `manage.py load_booklets`; empty = the chat answers
+# without the booklets, as before. BOOKLETS_DIR holds the PDFs it uploads.
+GEMINI_FILE_SEARCH_STORE = os.getenv('GEMINI_FILE_SEARCH_STORE', '').strip()
+BOOKLETS_DIR = os.getenv('BOOKLETS_DIR', str(BASE_DIR / 'booklets'))
+
 # JWT
 SIMPLE_JWT = {
     # Short access tokens limit the damage of a leaked token; the apps refresh them on a 401
