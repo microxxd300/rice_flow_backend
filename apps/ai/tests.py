@@ -31,6 +31,7 @@ def gemini_reply(text, status_code=200):
 
 @patch('apps.ai.context.get_current_weather', return_value=WEATHER)
 @patch.object(views, 'GEMINI_API_KEY', 'test-key')
+@override_settings(GEMINI_FILE_SEARCH_STORE='')   # the plain chat; the booklet search has its own tests
 class AIChatGuardrailTests(TestCase):
     """The chat keeps its instructions private and stays on rice farming and the app."""
 
@@ -119,6 +120,7 @@ class AIChatGuardrailTests(TestCase):
 
 @patch('apps.ai.context.get_current_weather', return_value=WEATHER)
 @patch.object(views, 'GEMINI_API_KEY', 'test-key')
+@override_settings(GEMINI_FILE_SEARCH_STORE='')   # the plain chat; the booklet search has its own tests
 class AIChatFarmerDataTests(TestCase):
     """Answers fit the farmer's own farm, and the free Gemini pool lasts for every farmer."""
 

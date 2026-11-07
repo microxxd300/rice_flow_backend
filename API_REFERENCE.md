@@ -885,9 +885,23 @@ farm is ignored (the newest of your own farms is used). `message` is at most 100
 ```json
 {
   "reply":    "Your Tubigan 18 is on day 28 (tillering), so apply about 1.5 bags of urea per hectare...",
-  "language": "en"
+  "language": "en",
+  "grounded": true,
+  "sources":  [{"title": "PalayCheck System for Irrigated Lowland Rice (2022 revised edition)",
+                "publisher": "PhilRice", "pages": "p. 38", "url": "https://..."}]
 }
 ```
+
+**Booklet search (RAG).** With `GEMINI_FILE_SEARCH_STORE` set, GeoRice AI first searches the
+DA-PhilRice booklets (PalayCheck 2022, Key Check 7, the field guide, the disease, snail and
+pest handouts; `apps/ai/booklets.py`) with Gemini File Search, using the Flash-Lite models
+that support it, and answers from what it finds. `sources` lists the booklet parts the
+answer used (at most 4), with the printed page (`p. 48`), slide (`slide 15`) or `chart`;
+`grounded` is `true` when there is at least one. If the search fails, the chat answers
+without it (`grounded: false`, `sources: []`). A reply naming a pesticide is replaced by
+advice to ask an agriculturist. The booklets are uploaded once with
+`python manage.py load_booklets --dir <folder with the PDFs>`, which prints the store name
+for `.env`; indexing costs about $0.02 and storage and search are free.
 
 | Status | When |
 |---|---|

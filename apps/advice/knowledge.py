@@ -58,6 +58,17 @@ SOURCES = {
         'publisher': 'PhilRice (PinoyRice)',
         'url': 'https://www.pinoyrice.com/download/pamamahala-ng-armyworm-at-planthopper',
     },
+    # Read by GeoRice AI's booklet search (apps/ai/booklets.py), not quoted on the cards
+    'field_guide': {
+        'title': 'Field Guide: Harmful and Useful Organisms in Philippine Rice Fields',
+        'publisher': 'PhilRice',
+        'url': 'https://www.philrice.gov.ph/wp-content/uploads/2023/02/Field-Guide_-Harmful-and-useful-organisms-in-Philippine-rice-fields-Insects-and-Non-insects.pdf',
+    },
+    'sheath_rot': {
+        'title': 'Sheath Rot (handout)',
+        'publisher': 'PhilRice (PinoyRice)',
+        'url': 'https://www.pinoyrice.com/download/sheath-rot/',
+    },
 }
 
 # Who to call. The PhilRice Text Center number is from PhilRice's site (2024);
