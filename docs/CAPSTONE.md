@@ -83,7 +83,7 @@ Run the backend locally (`python manage.py runserver`) and log in once to get a 
 | Argon2 hashing | ✅ | Argon2 first; old PBKDF2 hashes upgrade on next login | Django admin → a user created or logged in since the change shows `argon2` in the password field |
 | Strong password validators | ✅ | Register now runs Django's validators (they were configured but never called) | Register with `password123`: 400 |
 | django-axes lockout | ⏭️ | Login rate limiting covers password guessing | |
-| Rate limiting (anon/user/scoped, `NUM_PROXIES`, 429 + `Retry-After`) | ✅ | Login 10/min, register 10/hour, AI chat 60/hour, 300/hour anonymous, 3000/hour per user. Real client IP behind nginx/Render/ngrok, and a faked `X-Forwarded-For` doesn't help | Demo #1 |
+| Rate limiting (anon/user/scoped, `NUM_PROXIES`, 429 + `Retry-After`) | ✅ | Login 10/min, register 10/hour, AI chat 60/hour, 300/hour anonymous, 3000/hour per user. Real client IP behind Caddy/nginx/ngrok, and a faked `X-Forwarded-For` doesn't help | Demo #1 |
 | nginx `limit_req` | ❌ | Not done; Django rate limiting covers the API | |
 | Default `IsAuthenticated`, role-based permissions | ✅ | Default in `REST_FRAMEWORK`; admin endpoints use `IsAdminUser`; roles: farmer, agriculturist (staff), admin (superuser) | Farmer token on `/api/auth/users/`: 403 |
 | Object-level permissions / no IDOR | ✅ | Reads were already filtered by `request.user`. **Fixed:** farmers could create or move cycles, logs and yield records onto another farmer's farm | Demo #7 |
@@ -162,4 +162,4 @@ Run the backend locally (`python manage.py runserver`) and log in once to get a 
 - Admin tokens are in `localStorage` (decision explained in section 5). No inactivity logout, no error boundary.
 - 42 dependency advisories remain in the mobile app's Expo / React Native build tooling until an Expo SDK upgrade.
 - Data Privacy Act steps are not implemented yet.
-- Production deployment (Render) is waiting for approval; CD already builds and publishes the Docker image.
+- Production runs on an Azure VM (api.riceflow.me, see deploy/); CD builds the image, deploys it over SSH and checks /api/health/.

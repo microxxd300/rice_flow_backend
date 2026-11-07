@@ -1,0 +1,6 @@
+# HTTPS for the RiceFlow API. Caddy gets and renews the certificate by itself once the
+# DNS A record for api.riceflow.me points to this VM and ports 80 and 443 are open.
+api.riceflow.me {
+	encode gzip
+	reverse_proxy backend:8000
+}
