@@ -247,3 +247,14 @@ class ProblemLogTipTests(TestCase):
         self.log.refresh_from_db()
         self.assertIsNotNone(self.log.resolved_at)
         self.assertIsNone(self.log.advice_tip)
+
+
+class ExplainTrimTests(TestCase):
+    def test_who_to_call_is_not_repeated_and_at_most_three_points_are_kept(self):
+        cards = services.numbered_cards('stem_borer')
+        help_card = next(c for c, item in cards.items() if item is GET_HELP)
+        answer = {'points': [{'text': f'Point {i}.', 'cards': ['C4']} for i in range(5)]
+                  + [{'text': 'Call the City Agriculture Office.', 'cards': [help_card]}]}
+        answer['points'].insert(0, {'text': 'Call them.', 'cards': [help_card]})
+        points = services.check_explanation(answer, 'stem_borer', cards)
+        self.assertEqual([p['text'] for p in points], ['Point 0.', 'Point 1.', 'Point 2.'])
