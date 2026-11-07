@@ -27,3 +27,8 @@ coverage.xml
 
 # PhilRice / PalayCheck PDFs uploaded by `manage.py load_booklets` (not ours to publish)
 booklets/
+
+# The production settings on the Azure VM (copy from deploy/.env.prod.example)
+.env.prod
+deploy/.env.prod
+deploy/data/

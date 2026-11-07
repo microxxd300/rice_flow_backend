@@ -1,0 +1,84 @@
+# RiceFlow backend on the Azure VM: Caddy (HTTPS for api.riceflow.me) -> Django -> PostgreSQL + Redis.
+# The admin website and landing page are on Vercel, so they are not here.
+#
+#   cd /opt/riceflow
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Files next to this one on the VM (none of them are in git):
+#   .env.prod            settings and secrets (copy .env.prod.example)
+#   Caddyfile            the HTTPS proxy
+#   data/*.npz           land cover, buildings, soil (made by load_land_data / load_openlandmap)
+#   data/harvests.csv    the DA harvest reports the yield model learns from
+
+name: riceflow
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # the HTTPS certificates
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/microxxd300/rice_flow_backend:${TAG:-latest}
+    env_file: .env.prod
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      YIELD_TRAINING_CSV: /app/data/harvests.csv
+    expose:
+      - "8000"
+    volumes:
+      # Trained models and uploads survive restarts and new releases
+      - models:/app/models/trained
+      - media:/app/media
+      # The land and soil maps (git-ignored), mounted one by one so the committed GeoJSON stays
+      - ./data/panabo_landcover.npz:/app/apps/farms/land_data/panabo_landcover.npz:ro
+      - ./data/panabo_buildings.npz:/app/apps/farms/land_data/panabo_buildings.npz:ro
+      - ./data/panabo_openlandmap.npz:/app/apps/environmental/data/panabo_openlandmap.npz:ro
+      - ./data/harvests.csv:/app/data/harvests.csv:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthcheck comes from the Dockerfile (python docker/healthcheck.py)
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    env_file: .env.prod
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # A small cache on a 1 GB VM: old entries make room for new ones
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  models:
+  media:
+  caddy_data:
+  caddy_config:
