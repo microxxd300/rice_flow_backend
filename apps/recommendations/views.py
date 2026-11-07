@@ -2,14 +2,17 @@ from datetime import date, timedelta
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from apps.accounts.permissions import IsSuperUser
+from apps.activity.record import log_change
 from apps.environmental.models import EnvironmentalScan
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
 from .models import ClusterModel, Recommendation, RecommendationResult, SuitabilityRuleSet
 from .scoring import calculate_rsi, default_rules_payload
-from .clustering import train_all_models, predict_cluster
+from .clustering import predict_cluster
+from .training import train_and_record
 from .fit_explanation import build_fit_explanation
 from .serializers import (
     RecommendationSerializer, ClusterModelSerializer, SuitabilityRuleSetSerializer
@@ -72,7 +75,7 @@ class SuitabilityRulesView(APIView):
     def get_permissions(self):
         if self.request.method == 'GET':
             return [IsAuthenticated()]
-        return [IsAdminUser()]
+        return [IsSuperUser()]
 
     def get(self, request):
         rs = SuitabilityRuleSet.objects.first()
@@ -90,9 +93,15 @@ class SuitabilityRulesView(APIView):
 
     def put(self, request):
         rs = SuitabilityRuleSet.objects.first()
+        before = (rs.payload if rs else {}) or {}
         serializer = SuitabilityRuleSetSerializer(rs, data=request.data, partial=False)
         serializer.is_valid(raise_exception=True)
         rs = serializer.save(updated_by=request.user)
+        changes = _rule_changes(before, rs.payload or {})
+        if changes:
+            log_change(request.user, 'rules.updated',
+                       f'saved the suitability rules ({len(changes)} value{"s" if len(changes) != 1 else ""} changed)',
+                       target='Suitability rules', changes=changes)
         out = SuitabilityRuleSetSerializer(rs).data
         out['source'] = 'database'
         return Response(out, status=status.HTTP_200_OK)
@@ -129,7 +138,8 @@ class GenerateRecommendationView(APIView):
                 'variety_cluster': v_cluster,
             })
 
-        results.sort(key=lambda x: x['rsi_score'], reverse=True)
+        # Equal scores: the higher-yielding variety first, not whichever the database lists first
+        results.sort(key=lambda x: (x['rsi_score'], x['variety'].avg_yield_t_ha or 0), reverse=True)
         top3 = results[:3]
 
         rec = Recommendation.objects.create(
@@ -168,46 +178,44 @@ class GenerateRecommendationView(APIView):
         return Response(RecommendationSerializer(rec).data, status=status.HTTP_201_CREATED)
 
 
+def _rule_changes(before, after):
+    """{"<factor> <field>": [old, new]} for every suitability value that changed."""
+    old = {r.get('key'): r for r in before.get('rules', []) if isinstance(r, dict)}
+    changes = {}
+    for rule in after.get('rules', []):
+        if not isinstance(rule, dict):
+            continue
+        prev = old.get(rule.get('key'), {})
+        label = rule.get('label') or rule.get('key')
+        for field, value in rule.items():
+            if field not in ('key', 'label', 'group', 'unit', 'type') and prev.get(field) != value:
+                changes[f'{label} {field}'] = [prev.get(field), value]
+    return changes
+
+
 class TrainModelsView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request):
-        varieties = list(RiceVariety.objects.filter(is_active=True))
-        if len(varieties) < 4:
-            return Response({'error': 'Need at least 4 varieties to cluster.'}, status=400)
-
-        results, _ = train_all_models(varieties)
-
-        # Drop rows for algorithms we no longer train (e.g. legacy
-        # agglomerative/dbscan entries from older versions).
-        ClusterModel.objects.exclude(name__in=list(results.keys())).delete()
-
-        saved = []
-        for name, res in results.items():
-            cm, _ = ClusterModel.objects.update_or_create(
-                name=name,
-                defaults={
-                    'training_time_ms': res['training_time_ms'],
-                    'silhouette_score': res['silhouette'],
-                    'davies_bouldin':   res['davies_bouldin'],
-                    'n_clusters':       res['n_clusters'],
-                    # K-Means is the only model — make it active immediately.
-                    'is_active':        True,
-                }
-            )
-            saved.append(ClusterModelSerializer(cm).data)
-
-        return Response({'models': saved, 'message': 'Training complete. K-Means is now the active model.'})
+        try:
+            saved = train_and_record()
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+        log_change(request.user, 'model.trained', 'retrained the K-Means clustering models')
+        return Response({'models': ClusterModelSerializer(saved, many=True).data,
+                         'message': 'Training complete. K-Means is now the active model.'})
 
 
 class SetActiveModelView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def post(self, request, model_name):
         try:
             cm = ClusterModel.objects.get(name=model_name)
             cm.is_active = True
             cm.save()
+            log_change(request.user, 'model.activated',
+                       f'made {cm.get_name_display()} the active clustering model')
             return Response({'message': f'{cm.get_name_display()} is now active.'})
         except ClusterModel.DoesNotExist:
             return Response({'error': 'Model not found.'}, status=404)

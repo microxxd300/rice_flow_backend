@@ -3,8 +3,13 @@ from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIV
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from apps.accounts.permissions import IsSuperUser, can_see_contacts
+from apps.activity.record import display_name, log_change, notify_cycle_removed
+from apps.predictions.history import after_harvest_recorded
+from apps.predictions.services import features_for_cycle, predict_yield, save_prediction
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
+from .stages import growth_stages, stage_today
 
 
 def _clean_full_name(u):
@@ -40,9 +45,12 @@ class AdminFarmCycleListView(APIView):
         if owner_id:
             cycles = cycles.filter(farm__user_id=owner_id)
 
+        stages = growth_stages()
+        show_contacts = can_see_contacts(request.user)
         data = []
         for c in cycles:
             yr   = getattr(c, 'yield_record', None)
+            stage = stage_today(c, stages)
             farm = c.farm
             user = farm.user
             data.append({
@@ -51,7 +59,7 @@ class AdminFarmCycleListView(APIView):
                 'farm_name':             farm.name,
                 'owner_id':              user.id,
                 'owner_name':            _clean_full_name(user),
-                'owner_email':           user.email,
+                'owner_email':           user.email if show_contacts else None,
                 'barangay':              farm.barangay or '',
                 'latitude':              float(farm.latitude),
                 'longitude':             float(farm.longitude),
@@ -65,8 +73,8 @@ class AdminFarmCycleListView(APIView):
                 'planting_date':         c.planting_date.isoformat()         if c.planting_date         else None,
                 'expected_harvest_date': c.expected_harvest_date.isoformat() if c.expected_harvest_date else None,
                 'actual_harvest_date':   c.actual_harvest_date.isoformat()   if c.actual_harvest_date   else None,
-                'current_stage':         c.current_stage.name if c.current_stage else None,
-                'stage_no':              c.current_stage.stage_no if c.current_stage else None,
+                'current_stage':         stage.name if stage else None,
+                'stage_no':              stage.stage_no if stage else None,
                 'status':                c.status,
                 'yield_t_ha':            yr.yield_per_ha if yr else None,
                 'created_at':            c.created_at.isoformat(),
@@ -75,14 +83,18 @@ class AdminFarmCycleListView(APIView):
 
 
 class AdminFarmCycleDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def delete(self, request, pk):
         try:
-            cycle = FarmCycle.objects.get(pk=pk)
+            cycle = FarmCycle.objects.select_related('farm__user').get(pk=pk)
         except FarmCycle.DoesNotExist:
             return Response({'error': 'Farm cycle not found.'},
                             status=status.HTTP_404_NOT_FOUND)
+        notify_cycle_removed(cycle)
+        log_change(request.user, 'cycle.deleted',
+                   f'deleted the {cycle.get_season_display()} {cycle.year} cycle on "{cycle.farm.name}" '
+                   f'of {display_name(cycle.farm.user)}', target=cycle.farm.name)
         cycle.delete()
         return Response({'id': pk, 'deleted': True})
 
@@ -160,7 +172,16 @@ class YieldRecordView(APIView):
         data = {**request.data, 'farm_cycle': cycle.id}
         serializer = YieldRecordSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        # What the model predicts for this crop just before its harvest is recorded, kept
+        # so the harvest can be compared with it (and before any retrain learns from it)
+        save_prediction(cycle, predict_yield(features_for_cycle(cycle)))
+        record = serializer.save()
+        # Enough new harvests retrain the yield model in the background
+        after_harvest_recorded()
+        # A harvest ends the season, so the farm's next recommendation can start a new cycle
+        cycle.status = 'completed'
+        cycle.actual_harvest_date = record.harvest_date
+        cycle.save(update_fields=['status', 'actual_harvest_date'])
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def patch(self, request, cycle_id):

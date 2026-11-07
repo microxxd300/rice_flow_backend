@@ -24,6 +24,10 @@ class GuideStep(models.Model):
     guide           = models.ForeignKey(PlantingGuide, on_delete=models.CASCADE, related_name='steps')
     growth_stage    = models.ForeignKey(GrowthStage, on_delete=models.SET_NULL, null=True, blank=True)
     step_no         = models.IntegerField()
+    # The PalayCheck step this row is (palaycheck.STEPS key) and its KeyCheck; blank on rows
+    # from before PalayCheck (Gemini guides)
+    template_key    = models.CharField(max_length=30, blank=True)
+    key_check       = models.PositiveSmallIntegerField(null=True, blank=True)
     title           = models.CharField(max_length=150)
     description     = models.TextField()
     category        = models.CharField(max_length=20, blank=True, default='')

@@ -387,7 +387,8 @@ https://api.open-meteo.com/v1/elevation?latitude=7.3086&longitude=125.6830
 
 ## 🗺️ OpenStreetMap Nominatim — reverse geocoding
 
-**What it gives us:** human-readable address from lat/lng (e.g., barangay name).
+**What it gives us:** human-readable address from lat/lng. RiceFlow no longer uses it for the
+barangay (that comes from the official boundaries; see Farms).
 
 **Base URL:** `https://nominatim.openstreetmap.org/reverse`
 
@@ -491,12 +492,11 @@ ngrok-skip-browser-warning: true
   "password":     "strongpassword",
   "password2":    "strongpassword",
   "first_name":   "Juan",
-  "last_name":    "Dela Cruz",
-  "barangay":     "Tibungol",
-  "municipality": "Panabo City",
-  "province":     "Davao del Norte"
+  "last_name":    "Dela Cruz"
 }
 ```
+No barangay at sign-up: the farmer's barangay is taken from their first farm pin. City and
+province are always Panabo City and Davao del Norte.
 
 ### Login
 ```
@@ -522,6 +522,49 @@ ngrok-skip-browser-warning: true
 
 ---
 
+## 👥 Admin roles (admin website)
+
+Two staff roles, from the flags already on the user (no extra table):
+
+| Role | Flags | Can do |
+|---|---|---|
+| **Admin** (developers) | `is_staff` + `is_superuser` | Everything |
+| **Validator** (agriculturist engineer) | `is_staff` only | Read the dashboard, farms, cycles, varieties, rules and yield models; correct a variety (`PUT`/`PATCH /api/varieties/<id>/`; `is_active` is ignored, so only the admin deactivates) |
+
+Admin only (a validator gets `403`): `/api/auth/users/` (list, create, edit, delete),
+`DELETE /api/farms/admin/<id>/`, `POST /api/farms/cleanup/`, `DELETE /api/progress/admin/cycles/<id>/`,
+`POST /api/varieties/`, `DELETE /api/varieties/<id>/`, `POST /api/varieties/import-csv/`,
+`PUT /api/recommendations/rules/`, both `train/` endpoints, and `set-model/`.
+
+Farmer emails (`owner_email` in `/api/farms/all/` and `/api/progress/admin/cycles/`) are `null`
+for a validator: contact details are for the admin only (Data Privacy Act).
+
+### Season board (both roles)
+```
+GET /api/auth/admin-season/
+Authorization: Bearer <TOKEN>
+```
+The dashboard's season board: active crops at each of the 10 growth stages (by the crop's age
+or its logged steps), and four lists of farms that need attention. Each list has a `count` and
+up to 8 `items`, worst first; rows carry `farm_id`, `farm`, `farmer` (name, no email), `barangay`.
+```json
+{
+  "active_crops": 17,
+  "stages": [{ "stage_no": 1, "name": "Germination & Seedling", "count": 4 }, …],
+  "attention": {
+    "late_steps":      { "count": 2, "items": [{ "step": "Level the field", "due": "2026-11-01", "days_late": 4, … }] },
+    "problems":        { "count": 1, "items": [{ "issue": "pest", "issue_label": "Pest", "severity": "high", "date": "2026-11-04", "note": "…", … }] },
+    "flagged_pins":    { "count": 3, "items": [{ "flag": "built_up", "kept": true, … }] },
+    "harvest_overdue": { "count": 0, "items": [] }
+  }
+}
+```
+Late = the current PalayCheck step is 3+ days past its date. Problems = logs with an issue in the
+last 7 days. Flagged pins = the location check said road, building, water or mangrove (`kept`:
+the farmer kept the pin anyway). Overdue = 7+ days past the expected harvest with no yield record.
+
+---
+
 ## 🌾 Farms (`apps/farms/`)
 
 ### List all my farms
@@ -540,13 +583,18 @@ Content-Type: application/json
 
 {
   "name":           "Santos Family Farm",
-  "barangay":       "Tibungol",
   "latitude":       7.3086,
   "longitude":      125.6830,
   "area_hectares":  2.5,
   "ecosystem":      "irrigated_lowland"
 }
 ```
+`barangay` is read-only: the server sets it from the pin using the official barangay boundaries
+(NAMRIA v2023-11-06 + PSA PSGC, `apps/farms/land_data/panabo_barangays.geojson`), and again when
+the pin moves. A pin between two barangays gets the nearest one. `GET /api/farms/check-location/`
+returns the same `barangay` so the app can show it while the farmer moves the pin.
+`python manage.py fix_farm_barangays` lists farms whose saved barangay differs from their pin
+(`--apply` saves).
 
 ### Get one farm
 ```
@@ -568,6 +616,23 @@ ngrok-skip-browser-warning: true
 
 **What this does:** The backend gets the farm's GPS coordinates, then **calls SoilGrids and Open-Meteo in parallel** using ThreadPoolExecutor. It saves the combined result as one row in `environmental_scans`. This is the data later used by RSI scoring.
 
+**Soil texture from BSWM:** the texture comes from the **BSWM Philippine Soil Series** map at the pin (`soil_series`, e.g. "Cabangan clay loam" → `soil_texture` "clay loam"). It is a measured soil survey, so it replaces the SoilGrids texture, and it still works when SoilGrids is down. The map is clipped to Panabo City by `python manage.py load_soil_series --shapefile <PhilSoilSeries.shp>` into `apps/environmental/data/panabo_soil_series.geojson`. pH, organic matter and drainage still come from SoilGrids (or the defaults).
+
+**Soil values from OpenLandMap first:** pH, organic carbon, clay, sand, silt and bulk density come from the **OpenLandMap-soildb** maps (2020-2022, 0-30 cm, 120 m, CC BY 4.0, [doi:10.5281/zenodo.15608972](https://doi.org/10.5281/zenodo.15608972)) saved for the Panabo area, so a scan reads them locally in about a second. SoilGrids is only the backup for a point outside that area. `soil_source` says which was used: `openlandmap`, `soilgrids`, or `default` (neither had values). The saved file `apps/environmental/data/panabo_openlandmap.npz` is not in git (`*.npz`), so build it once on each machine or server: `pip install rasterio` then `python manage.py load_openlandmap` (about a minute). Without it, scans use SoilGrids as before.
+
+**When SoilGrids is slow or down:** a scan waits at most 20 s for soil, then uses the points that answered (or the defaults, `soil_sampling.estimated: true`); a slow point still finishes in the background and is cached for the next scan. After a failure SoilGrids is skipped for 10 minutes, so other scans do not wait on it. Only real SoilGrids values are cached (30 days), never defaults. A farm deleted while its scan runs gets `404`.
+
+**Soil across the whole farm:** soil is read at the pin **plus points north, east, south and west of it**, spread over the farm's `area_hectares` (one point per 250 m SoilGrids pixel, so usually 1–5 points). The readings are averaged; points where SoilGrids has no data (built-up areas, water) are left out. Weather, rainfall and elevation are read at the pin, since their grids are bigger than a farm. The extra `soil_sampling` field reports what happened:
+
+| Field | Meaning |
+|---|---|
+| `points` | soil points used in the average |
+| `points_without_data` | points skipped because SoilGrids had no data there |
+| `estimated` | `true` when no point had data, so the soil values are defaults |
+| `ph_range`, `clay_pct_range` | lowest and highest reading across the points |
+| `varies` | `true` when pH differs by more than 0.5 or clay by more than 10 points |
+| `message` | when `varies`: advice to register the different parts of the land as separate farms |
+
 **Response example:**
 ```json
 {
@@ -575,13 +640,19 @@ ngrok-skip-browser-warning: true
   "farm": 1,
   "soil_ph": 6.2,
   "soil_texture": "clay loam",
+  "soil_series": "Cabangan clay loam",
   "organic_matter": 2.5,
   "drainage": "poorly drained",
   "avg_temperature": 27,
   "seasonal_rainfall_mm": 1800,
   "humidity_pct": 82,
   "elevation_m": 45,
-  "flood_risk": "Low"
+  "flood_risk": "Low",
+  "soil_sampling": {
+    "points": 3, "points_without_data": 0, "estimated": false,
+    "ph_range": [5.2, 5.3], "clay_pct_range": [35.9, 37.4],
+    "varies": false, "message": ""
+  }
 }
 ```
 
@@ -597,6 +668,16 @@ ngrok-skip-browser-warning: true
 GET https://doing-haven-requisite.ngrok-free.dev/api/environmental/weather/?lat=7.3086&lng=125.6830
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
+```
+Besides `current` and the next 8 `hourly` entries, the response has `outlook` (used by the planting guide's weather advice) and `fetched_at` (when the server got the forecast; it is cached for 10 minutes):
+
+```json
+"outlook": {
+  "rain_mm_6h": 0.0,  "rain_prob_6h": 20,
+  "rain_mm_24h": 0.6, "rain_prob_24h": 88,
+  "rain_mm_48h": 0.7, "rain_prob_48h": 88,
+  "wind_kph_max_12h": 7
+}
 ```
 
 ---
@@ -713,7 +794,7 @@ ngrok-skip-browser-warning: true
 
 ## 📖 Planting Guides (`apps/guides/`)
 
-### Generate a planting guide using Gemini
+### Get the PalayCheck planting guide
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/guides/generate/{recommendation_id}/
 Authorization: Bearer <TOKEN>
@@ -721,25 +802,30 @@ ngrok-skip-browser-warning: true
 Content-Type: application/json
 
 {
+  "variety":  12,
   "season":   "Wet Season",
-  "language": "en",
-  "logs":     []
+  "language": "en"
 }
 ```
+The steps are a summary of the PalayCheck System 2022 Revised Edition (DA-PhilRice), timed for the variety's maturity (`apps/guides/palaycheck.py`). No AI writes them.
 
-### Append one new step to a guide
-```
-POST https://doing-haven-requisite.ngrok-free.dev/api/guides/append-step/{recommendation_id}/
-Authorization: Bearer <TOKEN>
-ngrok-skip-browser-warning: true
-Content-Type: application/json
+`variety` is optional: the id of the variety the farmer picked. It must be one of the recommendation's results (otherwise `400`). Without it the guide keeps the variety picked earlier for this farm, or else uses the top-ranked one.
 
+`language` (`en`, `fil`, `ceb`) only changes the wording: the step ids and check-offs stay the same.
+
+| `source` | Meaning |
+|---|---|
+| `PALAYCHECK` | the steps were just built (a new guide, a guide from before PalayCheck, or `"force_regenerate": true`) |
+| `SAVED` | the saved steps, worded in the requested language |
+
+`start_date` is the sowing day (day 0), 10 days after the guide is made, so the first step (seed preparation) is due the day the guide is made. Each step:
+
+```json
 {
-  "category":       "fertilizer",
-  "last_day":       20,
-  "existing_count": 8,
-  "language":       "en",
-  "logs":           []
+  "id": 301, "stepNumber": 1, "key": "seeds", "keyCheck": 1,
+  "title": "...", "instruction": "...", "explanation": "...",
+  "reference": "PalayCheck 2022, pp. 14-15", "referenceUrl": "https://www.philrice.gov.ph/...pdf",
+  "daysAfterPlanting": -10, "category": "planting", "is_completed": false
 }
 ```
 
@@ -757,6 +843,20 @@ Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
 
+### Answer "Did you sow already?"
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/guides/{guide_id}/sowing/
+Authorization: Bearer <TOKEN>
+ngrok-skip-browser-warning: true
+Content-Type: application/json
+
+{ "sown": true, "date": "2026-11-12", "language": "en" }
+```
+- `"sown": true`: sown on `date` (default today; not in the future, at most 150 days ago). The guide's sowing day moves there, every step not done yet moves with it, the steps up to sowing count as done, a sowing log is saved, and the farm's active cycle gets that planting date and harvest date.
+- `"sown": false`: not yet. Sowing moves 3 days later (from today or the planned day); `400` if sowing is already logged.
+
+Returns the guide, like the generate endpoint. Logging the sowing step (`guide_step` = the "seedbed" step) does the same as `"sown": true` on the log date.
+
 ---
 
 ## 🤖 AI Chat (Gemini) — `apps/ai/`
@@ -771,17 +871,165 @@ Content-Type: application/json
 {
   "message":  "How much fertilizer should I apply?",
   "history":  [],
-  "language": "en"
+  "language": "en",
+  "farm":     12
 }
 ```
+
+`farm` is optional: the farm selected in the app. The answer uses that farm's scan, chosen
+variety, crop day, field logs, the current PalayCheck guide step (its text and page, so the
+answer follows the book; later steps are not sent, to save tokens) and weather. Another user's
+farm is ignored (the newest of your own farms is used). `message` is at most 1000 characters.
 
 **Response:**
 ```json
 {
-  "reply":    "For your variety, apply 14-14-14 fertilizer at 5 bags per hectare...",
-  "language": "en"
+  "reply":    "Your Tubigan 18 is on day 28 (tillering), so apply about 1.5 bags of urea per hectare...",
+  "language": "en",
+  "grounded": true,
+  "sources":  [{"title": "PalayCheck System for Irrigated Lowland Rice (2022 revised edition)",
+                "publisher": "PhilRice", "pages": "p. 38", "url": "https://..."}]
 }
 ```
+
+**Booklet search (RAG).** With `GEMINI_FILE_SEARCH_STORE` set, GeoRice AI first searches the
+DA-PhilRice booklets (PalayCheck 2022, Key Check 7, the field guide, the disease, snail and
+pest handouts; `apps/ai/booklets.py`) with Gemini File Search, using the Flash-Lite models
+that support it, and answers from what it finds. `sources` lists the booklet parts the
+answer used (at most 4), with the printed page (`p. 48`), slide (`slide 15`) or `chart`;
+`grounded` is `true` when there is at least one. If the search fails, the chat answers
+without it (`grounded: false`, `sources: []`). A reply naming a pesticide is replaced by
+advice to ask an agriculturist. The booklets are uploaded once with
+`python manage.py load_booklets --dir <folder with the PDFs>`, which prints the store name
+for `.env`; indexing costs about $0.02 and storage and search are free.
+
+| Status | When |
+|---|---|
+| `400` | `message` is empty or longer than 1000 characters |
+| `429` | the farmer reached `AI_CHAT_DAILY_LIMIT` answers today (default 15) |
+| `503` | every Gemini model is out of free quota or busy; try again later |
+| `504` | Gemini did not answer in time |
+
+The same first question within 6 hours returns the saved answer and does not count toward the limit.
+
+---
+
+## 🗒️ Change log and farmer notices — `apps/activity/`
+
+### Change log (admin only)
+```
+GET /api/activity/changes/?role=validator&limit=50
+```
+Every change made from the admin website, newest first: who (`actor_name`, `actor_role` =
+`admin`/`validator`), what (`action`, `summary`, `target`), when (`created_at`), and the old and
+new values (`changes`: `{"avg_yield_t_ha": [5.2, 5.4]}`). Passwords are never recorded, only
+`"password": ["", "changed"]`. `role` and `limit` (default 100, max 500) are optional. Validators
+and farmers get `403`.
+
+Logged actions: accounts created, edited or deactivated; farms and cycles deleted; farm cleanup;
+varieties added, edited, deactivated or imported; suitability rules saved; models retrained or
+activated. An edit that changes nothing is not logged.
+
+### Farmer notices (signed-in farmer)
+```
+GET /api/activity/notices/?after=<id>
+```
+The farmer's own notices from the last 30 days, newest first (at most 20); `after` returns only
+newer ones. The app checks this when it opens and puts them in the bell.
+
+| `kind` | When | `params` |
+|---|---|---|
+| `farm_removed` | the admin deleted their farm | `farm` |
+| `cycle_removed` | the admin deleted their crop cycle | `farm`, `season`, `year` |
+| `variety_updated` | a variety they are growing (active cycle) was edited | `variety` |
+| `variety_retired` | a variety they are growing was deactivated | `variety` |
+
+`title` and `body` are the English text; the app words the known kinds in the farmer's language.
+
+---
+
+## 🩺 Problem advice (booklets + AI) — `apps/advice/`
+
+The advice for a field problem comes from official PhilRice / PalayCheck booklets
+(`apps/advice/knowledge.py`): 9 problems plus "Not sure", every line in English,
+Filipino and Bisaya with its booklet and page. The AI never adds advice: it matches the
+farmer's words to a problem on the list, and explains that problem's cards for the farm.
+Every AI point must name the cards it used; plain code rejects an answer that cites a card
+it was not given, names a chemical or a dose, or brings in another problem. Then (or with
+no AI at all) the farmer still gets the booklet card. Matching and explaining share the
+farmer's daily AI limit with the chat (`AI_CHAT_DAILY_LIMIT`) and its `ai_chat` throttle.
+
+### List the problems (for the picker)
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/advice/problems/?language=ceb
+Authorization: Bearer <TOKEN>
+```
+`[{"key": "stem_borer", "category": "pest", "name": "Stem borer (aksip)", "hint": "..."}, ..., {"key": "unknown", ...}]`
+Keys: `rats`, `stem_borer`, `black_bug`, `planthopper`, `golden_apple_snail`, `blast`,
+`bacterial_leaf_blight`, `sheath_blight`, `tungro`, `unknown` (always last).
+
+### The booklet card (no AI; always works)
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/advice/problems/stem_borer/?language=fil
+Authorization: Bearer <TOKEN>
+```
+```json
+{
+  "key": "stem_borer", "category": "pest", "name": "Aksip (stem borer)",
+  "identify":     [{"text": "...", "sources": [{"title": "Harmful Organisms in Philippine Rice Fields", "publisher": "PhilRice", "pages": "chart", "url": "..."}]}],
+  "serious_when": {"text": "...", "sources": [{"title": "PalayCheck System ...", "pages": "p. 48", ...}]},
+  "do_now":       [{"text": "...", "sources": [...]}],
+  "dont":         [{"text": "...", "sources": [...]}],
+  "next_season":  [{"text": "...", "sources": [...]}],
+  "get_help":     {"text": "... text PhilRice at 0917-111-7423.", "sources": []},
+  "urgent":       "Severe problem reported. ...",
+  "checked_by_validator": false
+}
+```
+`serious_when` is `null` for `unknown`. Show `urgent` when the farmer marks the problem as severe.
+
+### Match the farmer's own words
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/advice/match/
+Authorization: Bearer <TOKEN>
+Content-Type: application/json
+
+{ "text": "naay mga uhay nga puti ug walay sulod", "language": "ceb" }
+```
+`{"matches": [{"key": "stem_borer", "name": "Stem borer (aksip)", "why": "..."}], "ai_used": true}`
+At most 3, best first, only keys from the list. Without the AI, the problem names and local
+words in the text decide (`ai_used: false`, `why` empty); `matches` can be empty. The farmer
+confirms one. `400` when `text` is empty.
+
+### Explain a problem for this farm
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/advice/explain/
+Authorization: Bearer <TOKEN>
+Content-Type: application/json
+
+{ "problem": "stem_borer", "language": "ceb", "farm": 12, "question": "Unsay akong buhaton karon?" }
+```
+`farm`, `question` and `log` are optional. The farm's stage, current guide step and weather
+come from the same summary the chat uses. With `log` (the id of the farmer's own problem
+log), the log's observation is the question, and a checked answer is saved on the log
+(`advice_tip`): the problem card under the planting guide asks the AI only once per problem.
+```json
+{
+  "problem": "stem_borer", "ai_used": true, "not_covered": false, "note": null,
+  "points": [{"text": "Susiha ang imong uma sayo sa buntag ...", "cards": ["C4"],
+              "sources": [{"title": "PalayCheck System ...", "pages": "p. 48", ...}]}]
+}
+```
+With no checked answer, `points` is `[]`, `ai_used` is `false` and `note` says why:
+`ai_unavailable`, `daily_limit` or `rejected`. Show the booklet card either way.
+`400` for an unknown problem.
+
+### Field logs name the problem
+`POST /api/progress/logs/` takes an optional `problem_key` (a key from the list above).
+It fills `issue_type` from the problem when that is empty; an unknown key is a `400`.
+`PATCH /api/progress/logs/{id}/` with `{"resolved_at": "<ISO time>"}` marks the problem
+fixed ("Okay na"): its card leaves the Guide tab and the admin season board. `advice_tip`
+is read-only (written by the explain endpoint).
 
 ---
 
@@ -818,19 +1066,38 @@ Content-Type: application/json
 }
 ```
 
-### See all trained model stats (R², MAE, RMSE)
+Optional `farm_id`, `variety_id` and `cycle_id` fill in the farm's barangay and
+ecosystem and the variety's seed type. With a `farm_id` (your own farm), the
+prediction is also **saved** for that farm's newest crop (or `cycle_id`) as a
+`YieldPrediction`, linked to the model that made it: one row per crop per model,
+updated when asked again. Nothing is saved once the crop's harvest is recorded,
+so every saved prediction can be compared fairly with the harvest.
+
+### See every training (R², MAE, RMSE)
 ```
 GET https://doing-haven-requisite.ngrok-free.dev/api/predictions/models/
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+Every training is kept, newest first; `is_active: true` marks the one in use.
+`harvests_seen` is how many RiceFlow harvests that training learned from.
 
-### Retrain all models (admin only)
+### Retrain now (admin only)
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/predictions/train/
 Authorization: Bearer <ADMIN_TOKEN>
 ngrok-skip-browser-warning: true
 ```
+The new model is used from then on. Older trainings are kept (each with its own
+model file) so saved predictions still point to the model that made them.
+
+### Automatic retraining
+After **5 new harvests** are recorded in RiceFlow (counted from the last training),
+the model retrains in the background on all the data. The new model is used only if
+its error on the DA test season is not worse than the current model's (MAE within 2%);
+otherwise it is kept, inactive, with a note, and the current model stays in use. Each
+automatic retrain is written to the change log as `model.auto_trained` by
+`RiceFlow` (role `system`). The first model is always trained by the admin.
 
 ---
 
@@ -842,6 +1109,7 @@ GET https://doing-haven-requisite.ngrok-free.dev/api/progress/cycles/?farm_id={f
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+Each cycle has `stage` (`{"stage_no": 3, "name": "Tillering"}`): today's stage, from the days since sowing or the planting-guide steps logged, whichever is further along. `current_stage` is the stage saved when the cycle started.
 
 ### Create a farm cycle
 ```
@@ -849,6 +1117,8 @@ POST https://doing-haven-requisite.ngrok-free.dev/api/progress/cycles/
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+A farm has one active cycle at a time: creating (or re-activating) a second one returns
+`400 {"farm": [...]}`. Cycle responses include `variety_name` and `yield_per_ha`.
 
 ### Get one cycle
 ```
@@ -879,15 +1149,22 @@ ngrok-skip-browser-warning: true
 Content-Type: application/json
 
 {
-  "cycle":          1,
-  "log_date":       "2026-06-03",
-  "growth_stage":   "Tillering",
-  "observed_issue": "Insect",
-  "severity":       "Low",
-  "action_taken":   "Sprayed pesticide",
-  "notes":          "Saw a few stem borers"
+  "farm_cycle":   1,
+  "log_date":     "2026-06-03",
+  "growth_stage": 3,
+  "issue_type":   "pest",
+  "severity":     "low",
+  "action_taken": "Sprayed pesticide",
+  "observation":  "Saw a few stem borers",
+  "guide_step":   301
 }
 ```
+- `guide_step` (optional) is the planting guide step this log finishes; saving the log marks that step done. It must be a step of the cycle's farm (otherwise `400`)
+- Logging a step after sowing before sowing was logged returns `sowing_estimate` (the sowing day that step implies, e.g. transplanting minus 21 days) for the app to confirm
+- `growth_stage` is a GrowthStage id from `GET /api/varieties/growth-stages/` (optional)
+- `issue_type`: `pest`, `disease`, `weather`, `nutrient`, `other`, or `""` for none
+- `severity`: `low`, `medium`, `high`, or `""`
+- `observation` is required
 
 ### Get the yield record for a cycle
 ```
@@ -911,6 +1188,12 @@ Content-Type: application/json
   "moisture_pct":      14.0
 }
 ```
+Creating the yield record (POST) marks the cycle `completed` and sets its
+`actual_harvest_date`, so the farm's next recommendation starts a new cycle.
+Just before saving, the yield model's prediction for the crop is saved (so the
+harvest can be compared with it), and the 5th new harvest since the last training
+starts an automatic retrain (see Yield Prediction).
+Use PATCH on the same URL to correct a saved record.
 
 ---
 
@@ -954,7 +1237,7 @@ Content-Type: application/json
 | **Open-Meteo Forecast** | api.open-meteo.com/v1/forecast | None | temperature, humidity, rainfall |
 | **Open-Meteo Elevation** | api.open-meteo.com/v1/elevation | None | elevation in meters |
 | **Nominatim** | nominatim.openstreetmap.org | None | reverse geocoding |
-| **Gemini** | generativelanguage.googleapis.com | API key (server-side) | AI chat + planting guide |
+| **Gemini** | generativelanguage.googleapis.com | API key (server-side) | AI chat |
 | **Our backend** | doing-haven-requisite.ngrok-free.dev/api | JWT | everything else |
 | **Health check** | /api/health/ | None | deploy and uptime checks |
 | **WLC weights** | /api/recommendations/rules/ | JWT | the validated reference-table |

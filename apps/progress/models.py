@@ -42,14 +42,26 @@ class ProgressLog(models.Model):
         ('nutrient', 'Nutrient Deficiency'),
         ('other',    'Other'),
     ]
+    SEVERITY_CHOICES = [('low', 'Low'), ('medium', 'Medium'), ('high', 'High')]
 
     farm_cycle    = models.ForeignKey(FarmCycle, on_delete=models.CASCADE, related_name='progress_logs')
     log_date      = models.DateField()
     growth_stage  = models.ForeignKey(GrowthStage, on_delete=models.SET_NULL, null=True, blank=True)
     observation   = models.TextField()
     issue_type    = models.CharField(max_length=15, choices=ISSUE_CHOICES, blank=True)
+    severity      = models.CharField(max_length=10, choices=SEVERITY_CHOICES, blank=True)
+    # Which problem from the advice list (apps/advice/knowledge.py), e.g. 'stem_borer'
+    problem_key   = models.CharField(max_length=40, blank=True)
+    # The farmer tapped "the problem is fixed": its card leaves the Guide tab
+    resolved_at   = models.DateTimeField(null=True, blank=True)
+    # GeoRice AI's tip for this problem on this farm, saved so it is asked only once
+    advice_tip    = models.JSONField(null=True, blank=True)
     action_taken  = models.TextField(blank=True)
     photo_url     = models.URLField(blank=True)
+    # The planting-guide step this log records; saving the log marks the step done (the
+    # guide shows one step at a time and moves on when the farmer logs it)
+    guide_step    = models.ForeignKey('guides.GuideStep', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='logs')
     created_at    = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

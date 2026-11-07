@@ -21,7 +21,9 @@ class TokenLifecycleTests(TestCase):
 
     def test_access_token_lasts_30_minutes(self):
         token = AccessToken(self.access)
-        self.assertEqual(token['exp'] - token['iat'], int(timedelta(minutes=30).total_seconds()))
+        # iat and exp are read from the clock a moment apart, so the whole-second
+        # difference can round down to 1799
+        self.assertAlmostEqual(token['exp'] - token['iat'], int(timedelta(minutes=30).total_seconds()), delta=1)
 
     def test_refresh_rotates_and_old_refresh_token_stops_working(self):
         r = self.refresh_with(self.refresh)

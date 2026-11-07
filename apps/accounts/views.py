@@ -1,6 +1,7 @@
 import os
 import time
 import concurrent.futures
+from collections import Counter
 import requests
 
 from django.contrib.auth import get_user_model
@@ -10,8 +11,11 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from .permissions import IsSuperUser
+from apps.activity.record import diff, display_name, field_list, log_change, role_of
 from config.exceptions import client_ip, security_log
 from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
+from apps.progress.stages import growth_stages, stage_today
 
 User = get_user_model()
 
@@ -47,7 +51,10 @@ class ProfileView(APIView):
         return Response(UserSerializer(request.user).data)
 
     def patch(self, request):
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        # Email and username are the login, so a farmer can't change them here (like the
+        # role fields); the admin user endpoints can
+        data = {k: v for k, v in request.data.items() if k not in ('email', 'username')}
+        serializer = UserSerializer(request.user, data=data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -70,7 +77,7 @@ def _clean_full_name(user):
 
 class AdminUserListView(APIView):
     """GET /api/auth/users/ — admin-only list of all users."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def get(self, request):
         from django.db.models import Prefetch, Count
@@ -91,7 +98,13 @@ class AdminUserListView(APIView):
 
     def post(self, request):
         """Create a new user account (admin-initiated)."""
-        return _create_or_update_user(request, instance=None)
+        res = _create_or_update_user(request, instance=None)
+        if res.status_code == status.HTTP_201_CREATED:
+            user = User.objects.get(pk=res.data['id'])
+            log_change(request.user, 'user.created',
+                       f'created the {role_of(user)} account of {display_name(user)}',
+                       target=display_name(user))
+        return res
 
     def patch(self, request):
         """
@@ -104,9 +117,14 @@ class AdminUserListView(APIView):
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        was_active = user.is_active
         if 'is_active' in request.data:
             user.is_active = bool(request.data['is_active'])
         user.save()
+        if user.is_active != was_active:
+            verb = 'reactivated' if user.is_active else 'deactivated'
+            log_change(request.user, 'user.updated', f'{verb} the account of {display_name(user)}',
+                       target=display_name(user), changes={'active': [was_active, user.is_active]})
         return Response({'id': user.id, 'is_active': user.is_active})
 
 
@@ -116,7 +134,7 @@ class AdminUserDetailView(APIView):
     PATCH  /api/auth/users/<id>/ — update credentials, role, address
     DELETE /api/auth/users/<id>/ — soft delete (sets is_active=False)
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsSuperUser]
 
     def get(self, request, pk):
         try:
@@ -129,7 +147,18 @@ class AdminUserDetailView(APIView):
             user = User.objects.get(pk=pk)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return _create_or_update_user(request, instance=user)
+        before = _audit_fields(user)
+        res = _create_or_update_user(request, instance=user)
+        if res.status_code == status.HTTP_200_OK:
+            user.refresh_from_db()
+            changes = diff(before, _audit_fields(user))
+            if (request.data.get('password') or '').strip():
+                changes['password'] = ['', 'changed']
+            if changes:
+                log_change(request.user, 'user.updated',
+                           f'edited the account of {display_name(user)} ({field_list(changes)})',
+                           target=display_name(user), changes=changes)
+        return res
 
     def delete(self, request, pk):
         try:
@@ -142,8 +171,12 @@ class AdminUserDetailView(APIView):
                 {'error': 'You cannot deactivate your own account.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        was_active = user.is_active
         user.is_active = False
         user.save(update_fields=['is_active'])
+        if was_active:
+            log_change(request.user, 'user.deactivated', f'deactivated the account of {display_name(user)}',
+                       target=display_name(user), changes={'active': [True, False]})
         return Response({'id': user.id, 'is_active': False})
 
 
@@ -211,6 +244,14 @@ _EDITABLE_FIELDS = (
     'phone', 'barangay', 'municipality', 'province',
 )
 _ROLES = ('farmer', 'admin', 'superadmin')
+
+
+def _audit_fields(u):
+    """The account fields the change log compares before and after an edit."""
+    return {
+        'name': display_name(u), 'username': u.username, 'email': u.email, 'phone': u.phone,
+        'barangay': u.barangay, 'role': role_of(u), 'active': u.is_active,
+    }
 
 
 def _create_or_update_user(request, instance=None):
@@ -446,6 +487,17 @@ class SystemHealthView(APIView):
         })
 
 
+class AdminSeasonView(APIView):
+    """GET /api/auth/admin-season/: crops per growth stage and the farms that need attention
+    (late guide steps, problems logged this week, flagged pins, harvests not recorded).
+    For both staff roles: the validator acts on it."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from .season_board import season_board
+        return Response(season_board())
+
+
 class AdminStatsView(APIView):
     """GET /api/auth/admin-stats/ — dashboard KPIs for the admin panel."""
     permission_classes = [IsAdminUser]
@@ -507,12 +559,15 @@ class AdminStatsView(APIView):
         ) or 0
         total_harvest_t = round(float(total_harvest_kg) / 1000, 2)
 
-        stage_dist = (
-            FarmCycle.objects
-            .filter(status='active', current_stage__isnull=False)
-            .values('current_stage__name')
-            .annotate(count=Count('id'))
+        # Stage for each crop's age, not the stage saved when the cycle started
+        stages = growth_stages()
+        stage_counts = Counter(
+            stage.name for stage in (
+                stage_today(c, stages)
+                for c in FarmCycle.objects.filter(status='active').select_related('farm', 'current_stage')
+            ) if stage
         )
+        stage_dist = [{'current_stage__name': name, 'count': n} for name, n in stage_counts.items()]
 
         # ── Farms grouped by ecosystem (for the donut chart) ───────────
         farms_by_ecosystem = list(
@@ -527,7 +582,6 @@ class AdminStatsView(APIView):
         # active farms by their GPS coordinates (rounded to ~1 km) and
         # return the representative lat/lng — the admin dashboard will
         # reverse-geocode it via Nominatim to get the real address.
-        from collections import Counter
         buckets = Counter()
         bucket_to_farms = {}
         for f in Farm.objects.filter(

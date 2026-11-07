@@ -24,3 +24,6 @@ coverage.xml
 
 # Docker Compose environment (copy from .env.docker.example)
 .env.docker
+
+# PhilRice / PalayCheck PDFs uploaded by `manage.py load_booklets` (not ours to publish)
+booklets/

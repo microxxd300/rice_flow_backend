@@ -21,7 +21,7 @@ step-by-step script for the full pipeline.
 | **Open-Meteo Forecast** | Open-Meteo.com (free, no key) | temperature, humidity, solar radiation, rainfall | avg temp, temp at flowering, humidity, solar, seasonal rainfall |
 | **Open-Meteo Archive** | Open-Meteo.com | real historical rainfall (past 365 days) | annual rainfall |
 | **Open-Meteo Elevation** | Open-Meteo.com | elevation (m) from digital elevation model | elevation |
-| **Google Gemini** | Google | AI planting guide + chat answers | (not RSI — guidance text) |
+| **Google Gemini** | Google | AI chat answers (the planting guide is PalayCheck 2022, not AI) | (not RSI — guidance text) |
 
 User-entered: farm GPS pin, ecosystem type, slope, field logs, harvest.
 Computed by us: **RSI score, flood risk, drainage class, variety clustering, yield prediction.**

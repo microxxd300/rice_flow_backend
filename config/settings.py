@@ -45,6 +45,8 @@ INSTALLED_APPS = [
     'apps.progress',
     'apps.predictions',
     'apps.ai',
+    'apps.activity',
+    'apps.advice',
 ]
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
@@ -168,7 +170,7 @@ REST_FRAMEWORK = {
         'user': '3000/hour',
         'login': '10/min',      # per IP: slows password guessing
         'register': '10/hour',  # per IP: stops mass sign-ups
-        'ai_chat': '60/hour',   # per user: caps Gemini usage
+        'ai_chat': '60/hour',   # per user: burst cap; AI_CHAT_DAILY_LIMIT caps answers a day
     },
     # Proxies in front of Django (nginx, Render, ngrok) so throttles use the real client IP
     # from X-Forwarded-For instead of a value the client could fake
@@ -176,6 +178,16 @@ REST_FRAMEWORK = {
     # Logs 403s/429s and turns unexpected errors into a JSON 500 without a stack trace
     'EXCEPTION_HANDLER': 'config.exceptions.exception_handler',
 }
+
+# AI chat answers per farmer per day. The Gemini free tier is one shared pool for the whole
+# app, so one farmer can't use it all up. Saved (reused) answers don't count.
+AI_CHAT_DAILY_LIMIT = int(os.getenv('AI_CHAT_DAILY_LIMIT', '15'))
+
+# GeoRice AI reads the PhilRice / PalayCheck booklets before answering (Gemini File
+# Search). The store is made by `manage.py load_booklets`; empty = the chat answers
+# without the booklets, as before. BOOKLETS_DIR holds the PDFs it uploads.
+GEMINI_FILE_SEARCH_STORE = os.getenv('GEMINI_FILE_SEARCH_STORE', '').strip()
+BOOKLETS_DIR = os.getenv('BOOKLETS_DIR', str(BASE_DIR / 'booklets'))
 
 # JWT
 SIMPLE_JWT = {
@@ -211,6 +223,10 @@ SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', '')
 # Trained model storage path
 MODELS_DIR = BASE_DIR / 'models' / 'trained'
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+# DA harvest-report CSV for the yield model (barangay-level, kept out of git).
+# Empty = train on app YieldRecords or the synthetic dataset instead.
+YIELD_TRAINING_CSV = os.getenv('YIELD_TRAINING_CSV', '')
 
 # Production security (the host terminates HTTPS and forwards X-Forwarded-Proto)
 if not DEBUG:

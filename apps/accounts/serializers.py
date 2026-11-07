@@ -12,8 +12,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
+        # No barangay: it is taken from the farmer's first farm pin (apps/farms/barangays.py)
         fields = ['email', 'password', 'password2', 'first_name', 'last_name',
-                  'barangay', 'municipality', 'province']
+                  'municipality', 'province']
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -50,6 +51,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+ACCOUNT_DISABLED = 'Your account is disabled. Please contact the RiceFlow office for help.'
+
+
 class LoginSerializer(serializers.Serializer):
     email    = serializers.EmailField()
     password = serializers.CharField(write_only=True)
@@ -59,11 +63,14 @@ class LoginSerializer(serializers.Serializer):
             user_obj = User.objects.get(email=data['email'])
         except User.DoesNotExist:
             raise serializers.ValidationError('Invalid credentials.')
+        # authenticate() returns None for a deactivated account even with the right
+        # password, so it could never be told apart from a wrong password. Say it is
+        # disabled only to someone who knows the password: no hint which emails exist.
+        if not user_obj.is_active and user_obj.check_password(data['password']):
+            raise serializers.ValidationError(ACCOUNT_DISABLED)
         user = authenticate(username=user_obj.username, password=data['password'])
         if not user:
             raise serializers.ValidationError('Invalid credentials.')
-        if not user.is_active:
-            raise serializers.ValidationError('Account is disabled.')
         refresh = RefreshToken.for_user(user)
         return {
             'user':          UserSerializer(user).data,

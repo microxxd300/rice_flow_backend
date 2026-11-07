@@ -4,6 +4,7 @@ Is a farm pin on farmland? Checks the pin against two clipped datasets built by
   - Google Open Buildings v3 footprints  -> is the pin on a roof?
   - ESA WorldCover 10 m 2021 land cover  -> is the pin in town, water, forest?
 """
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,6 +13,9 @@ import numpy as np
 DATA_DIR       = Path(__file__).resolve().parent / 'land_data'
 LANDCOVER_FILE = DATA_DIR / 'panabo_landcover.npz'
 BUILDINGS_FILE = DATA_DIR / 'panabo_buildings.npz'
+# Panabo City administrative boundary (OpenStreetMap relation 11768007, ODbL). Small and
+# committed, unlike the .npz files, so the outside-Panabo check also works in CI.
+BOUNDARY_FILE  = DATA_DIR / 'panabo_boundary.geojson'
 
 # (south, west, north, east): Panabo City extent from the MGB XI geohazard grid, plus ~1 km
 BBOX = (7.21, 125.53, 7.465, 125.73)
@@ -39,6 +43,7 @@ MESSAGES = {
     'water':       'This pin is on water. Move it to your rice field.',
     'mangrove':    'This pin is in a mangrove area. Move it to your rice field.',
     'unchecked':   'This location could not be checked.',
+    'outside_panabo': 'This pin is outside Panabo City. RiceFlow is for rice farms in Panabo City. Move it to your farm.',
 }
 
 
@@ -48,6 +53,14 @@ def _landcover():
         return None
     d = np.load(LANDCOVER_FILE)
     return {k: d[k] for k in d.files}
+
+
+@lru_cache(maxsize=1)
+def _panabo_boundary():
+    if not BOUNDARY_FILE.exists():
+        return None
+    geometry = json.loads(BOUNDARY_FILE.read_text(encoding='utf-8'))['features'][0]['geometry']
+    return np.array(geometry['coordinates'][0], dtype=float)  # outer ring, (lon, lat)
 
 
 @lru_cache(maxsize=1)
@@ -61,6 +74,14 @@ def _buildings():
 def in_coverage(lat: float, lon: float) -> bool:
     south, west, north, east = BBOX
     return south <= lat <= north and west <= lon <= east
+
+
+def in_panabo(lat: float, lon: float) -> bool:
+    """Inside the Panabo City boundary (the bounding box if the boundary file is missing)."""
+    ring = _panabo_boundary()
+    if ring is None:
+        return in_coverage(lat, lon)
+    return _inside_ring(lon, lat, ring)
 
 
 def land_cover_at(lat: float, lon: float):
@@ -99,9 +120,12 @@ def on_building(lat: float, lon: float):
 
 
 def check_pin(lat: float, lon: float) -> dict:
-    """status is 'ok', 'warning' or 'unchecked'; reason is the machine-readable code."""
-    if not in_coverage(lat, lon):
-        return _result('unchecked', None, None, None)
+    """status is 'ok', 'warning', 'outside' or 'unchecked'; reason is the machine-readable code.
+
+    'outside' means the pin is not in Panabo City; the app does not let the farmer keep it.
+    """
+    if not in_panabo(lat, lon):
+        return _result('outside', 'outside_panabo', None, None)
 
     building = on_building(lat, lon)
     code = land_cover_at(lat, lon)

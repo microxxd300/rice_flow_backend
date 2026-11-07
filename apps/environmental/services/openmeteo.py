@@ -52,8 +52,18 @@ def get_current_weather(lat: float, lon: float) -> dict:
     }
 
 
-@cached_by_location("openmeteo:annual_rainfall", ttl=DAY)
-def get_annual_rainfall(lat: float, lon: float) -> float:
+# Cropping seasons in Davao del Norte (DA reports): wet May-October, dry November-April
+WET_MONTHS = range(5, 11)
+
+
+def current_season(today=None) -> str:
+    from datetime import date
+    return 'wet' if (today or date.today()).month in WET_MONTHS else 'dry'
+
+
+@cached_by_location("openmeteo:rainfall_summary", ttl=DAY)
+def get_rainfall_summary(lat: float, lon: float) -> dict:
+    """Rain over the last 365 days: the whole year, and the wet- and dry-season months."""
     from datetime import date, timedelta
     end   = date.today() - timedelta(days=5)
     start = end - timedelta(days=365)
@@ -67,5 +77,39 @@ def get_annual_rainfall(lat: float, lon: float) -> float:
     }
     resp = requests.get(ARCHIVE_URL, params=params, timeout=15)
     resp.raise_for_status()
-    values = resp.json().get("daily", {}).get("precipitation_sum", [])
-    return round(sum(v for v in values if v is not None), 1)
+    daily = resp.json().get("daily", {})
+    wet = dry = 0.0
+    for day, mm in zip(daily.get("time", []), daily.get("precipitation_sum", [])):
+        if mm is None:
+            continue
+        if int(day[5:7]) in WET_MONTHS:
+            wet += mm
+        else:
+            dry += mm
+    return {"annual": round(wet + dry, 1), "wet_season": round(wet, 1), "dry_season": round(dry, 1)}
+
+
+MONTHLY_YEARS = 3
+
+
+@cached_by_location("openmeteo:monthly_rainfall", ttl=7 * DAY)
+def get_monthly_rainfall(lat: float, lon: float) -> list[float]:
+    """Average rain per calendar month (mm, Jan..Dec) over the last 3 full years at the farm."""
+    from datetime import date
+    last_year = date.today().year - 1
+    params = {
+        "latitude":   lat,
+        "longitude":  lon,
+        "start_date": f"{last_year - MONTHLY_YEARS + 1}-01-01",
+        "end_date":   f"{last_year}-12-31",
+        "daily":      "precipitation_sum",
+        "timezone":   "Asia/Manila",
+    }
+    resp = requests.get(ARCHIVE_URL, params=params, timeout=20)
+    resp.raise_for_status()
+    daily = resp.json().get("daily", {})
+    totals = [0.0] * 12
+    for day, mm in zip(daily.get("time", []), daily.get("precipitation_sum", [])):
+        if mm is not None:
+            totals[int(day[5:7]) - 1] += mm
+    return [round(t / MONTHLY_YEARS, 1) for t in totals]

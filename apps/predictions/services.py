@@ -1,29 +1,40 @@
 """
 Yield prediction service — Linear Regression.
 
-The model predicts yield (t/ha) from 11 raw farm/variety features plus
-engineered agronomic features. Linear Regression can only learn straight-line
-relationships, so the non-linear agronomy (pH sweet spot, heat stress,
-drought/waterlogging) is captured by explicitly engineered feature columns —
-computed identically at train and predict time.
+Training data, in order of preference:
 
-Validation: 5-fold cross-validation on the training split (reported in notes)
-plus held-out test metrics R², MAE, RMSE (the saved headline numbers).
-
-Training data: real YieldRecord rows once >= 30 exist; until then a synthetic
-dataset whose relationships follow documented rice agronomy (pH optimum around
-6.2, stress above 33 °C, drought below ~1400 mm, waterlogging above ~2600 mm).
+1. Real harvests: the Davao del Norte Provincial Agriculture harvest reports
+   (one row per barangay, season, ecosystem and seed class), read from the CSV at
+   settings.YIELD_TRAINING_CSV. The CSV is not in git. In this data the signal is
+   in seed type, ecosystem, season and location; soil and climate barely vary
+   within a barangay and added nothing in testing, so this model uses
+   seed type + ecosystem + season + municipality + barangay. Location names are
+   target-encoded (each place's typical yield, fitted without leaking the row's
+   own yield). It is tested on the newest season after training on the earlier ones.
+   The harvests farmers record in RiceFlow join it as rows of the same shape (dry palay
+   at 14% moisture over the area harvested; typos outside 1-15 t/ha left out), so each
+   recorded harvest teaches the model about Panabo. The headline test stays on DA rows.
+2. Without the CSV: real YieldRecord rows from the app once >= 30 exist.
+3. A synthetic dataset whose relationships follow documented rice agronomy
+   (pH optimum around 6.2, stress above 33 °C, drought below ~1400 mm,
+   waterlogging above ~2600 mm), with engineered features for those non-linear
+   effects. Validation: 5-fold CV on the training split plus held-out R², MAE, RMSE.
 """
 import os
+import uuid
+from datetime import datetime
+
 import numpy as np
+import pandas as pd
 import joblib
 from pathlib import Path
 from django.conf import settings
 
+from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, TargetEncoder
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import KFold, train_test_split, cross_val_score
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 MODELS_DIR: Path = settings.MODELS_DIR
@@ -96,6 +107,177 @@ def engineer_features(X_raw: np.ndarray) -> np.ndarray:
     ])
 
 
+# ── Real-harvest model (DA harvest reports) ──────────────────────────────────
+
+REAL_CATEGORICAL = ['ecosystem', 'season', 'seed_type']
+REAL_LOCATION    = ['municipality', 'barangay']
+REAL_COLUMNS     = REAL_CATEGORICAL + REAL_LOCATION
+PANABO           = 'city of panabo'   # every RiceFlow farm is inside Panabo City
+REAL_ECOSYSTEM   = {
+    'irrigated': 'irrigated', 'irrigated_lowland': 'irrigated', 'lowland': 'irrigated',
+    'rainfed_lowland': 'rainfed_lowland', 'rainfed': 'rainfed_lowland',
+    'upland': 'upland', 'highland': 'upland',
+}
+
+
+def new_model_path() -> Path:
+    """A file of its own for each training, so older models (kept for their saved
+    predictions) are never overwritten."""
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    return MODELS_DIR / f'yield_linear_{stamp}_{uuid.uuid4().hex[:6]}.pkl'
+
+
+def _place(name) -> str:
+    """Case- and spacing-insensitive place name, so 'Datu Abdul  Dadia' matches."""
+    return ' '.join(str(name or '').lower().split())
+
+
+def seed_type_for(variety) -> str:
+    """'Hybrid' for hybrid varieties (Mestizo line, NSIC codes ending in H), else 'Inbred'."""
+    name = f'{getattr(variety, "common_name", "")} {getattr(variety, "nsic_code", "")}'.lower()
+    code = str(getattr(variety, 'nsic_code', '')).strip().upper()
+    return 'Hybrid' if 'mestizo' in name or 'hybrid' in name or code.endswith('H') else 'Inbred'
+
+
+def real_features(raw: dict) -> pd.DataFrame:
+    """Map a prediction request to the real-harvest model's columns (1 row)."""
+    from apps.environmental.services.openmeteo import current_season
+
+    season = str(raw.get('season') or '').strip().lower()
+    if season not in ('wet', 'ws', 'dry', 'ds'):
+        season = current_season()             # the season being planted now
+    return pd.DataFrame([{
+        'ecosystem':    REAL_ECOSYSTEM.get(str(raw.get('ecosystem') or '').lower(), 'irrigated'),
+        'season':       'WS' if season in ('wet', 'ws') else 'DS',
+        'seed_type':    'Hybrid' if str(raw.get('seed_type') or '').lower().startswith('hyb') else 'Inbred',
+        'municipality': _place(raw.get('municipality') or PANABO),
+        'barangay':     _place(raw.get('barangay')),
+    }])
+
+
+# A recorded harvest outside this range is a typo (8,000 kg typed as 80,000), not a yield;
+# Davao del Norte farms usually get 3-7 t/ha
+APP_YIELD_RANGE = (1.0, 15.0)
+
+
+def dry_yield_kg(record) -> float:
+    """A harvest as dry palay at 14% moisture, the DA/PSA and NFA basis."""
+    if record.net_yield_kg:
+        return float(record.net_yield_kg)
+    moisture = record.moisture_pct or 14.0
+    return float(record.gross_yield_kg) * (100 - moisture) / (100 - 14)
+
+
+def app_harvest_rows() -> pd.DataFrame:
+    """The harvests farmers record in RiceFlow, as rows of the DA harvest report: Panabo
+    and the farm's barangay, the crop's season and harvest year, the farm's ecosystem, the
+    variety's seed type, and dry yield over the area harvested. Typos are left out."""
+    from apps.progress.models import YieldRecord
+
+    rows = []
+    for record in YieldRecord.objects.select_related('farm_cycle__farm', 'farm_cycle__variety'):
+        cycle, farm = record.farm_cycle, record.farm_cycle.farm
+        area = record.area_harvested_ha or 0
+        if area <= 0 or not farm.barangay:
+            continue
+        t_ha = dry_yield_kg(record) / 1000 / area
+        if not APP_YIELD_RANGE[0] <= t_ha <= APP_YIELD_RANGE[1]:
+            continue
+        rows.append({
+            'municipality': PANABO, 'barangay': farm.barangay,
+            'season': 'WS' if cycle.season == 'wet' else 'DS', 'harvest_year': record.harvest_date.year,
+            'ecosystem': farm.ecosystem, 'seed_type': seed_type_for(cycle.variety) if cycle.variety else 'Inbred',
+            'yield_t_ha': round(t_ha, 3),
+        })
+    return pd.DataFrame(rows, columns=REAL_COLUMNS + ['harvest_year', 'yield_t_ha'])
+
+
+def _load_real_rows(csv_path: str):
+    """The DA harvest-report CSV plus RiceFlow's own harvests → (features, yield t/ha,
+    season label, season order, source 'da' or 'app' per row)."""
+    df = pd.read_csv(csv_path)
+    missing = set(REAL_COLUMNS + ['harvest_year', 'yield_t_ha']) - set(df.columns)
+    if missing:
+        raise ValueError(f'{csv_path} is missing columns: {", ".join(sorted(missing))}')
+    df = df.dropna(subset=REAL_COLUMNS + ['harvest_year', 'yield_t_ha']).assign(source='da')
+    app = app_harvest_rows()
+    if len(app):
+        df = pd.concat([df, app.assign(source='app')], ignore_index=True)
+
+    X = pd.DataFrame({
+        'ecosystem':    df['ecosystem'].map(lambda e: REAL_ECOSYSTEM.get(str(e).lower(), 'irrigated')),
+        'season':       df['season'].str.upper().str.strip(),
+        'seed_type':    df['seed_type'].map(lambda s: 'Hybrid' if str(s).lower().startswith('hyb') else 'Inbred'),
+        'municipality': df['municipality'].map(_place),
+        'barangay':     df['barangay'].map(_place),
+    }).reset_index(drop=True)
+    y = df['yield_t_ha'].astype(float).to_numpy()
+    years = df['harvest_year'].astype(int).to_numpy()
+    label = np.array([f'{"Wet" if s == "WS" else "Dry"} {yr}' for s, yr in zip(X['season'], years)])
+    # A wet season (May–Oct) ends after the dry season (Nov–Apr) of the same harvest year
+    order = years * 2 + (X['season'] == 'WS').to_numpy()
+    return X, y, label, order, df['source'].to_numpy()
+
+
+def _real_pipeline() -> Pipeline:
+    prep = ColumnTransformer([
+        ('cat', OneHotEncoder(handle_unknown='ignore'), REAL_CATEGORICAL),
+        # Cross-fitted: each row's place encoding comes from the other folds
+        ('loc', TargetEncoder(target_type='continuous', cv=KFold(5, shuffle=True, random_state=42)),
+         REAL_LOCATION),
+    ])
+    return Pipeline([('prep', prep), ('model', LinearRegression())])
+
+
+def _train_real(csv_path: str) -> dict:
+    X, y, label, order, source = _load_real_rows(csv_path)
+    da = source == 'da'
+    if len(np.unique(order[da])) < 2:
+        raise ValueError('The harvest data needs at least two seasons to test on a new one.')
+
+    # Headline test: train on the earlier seasons, predict the newest DA season (DA rows
+    # only, so the score stays comparable as RiceFlow harvests come in)
+    test_order = order[da].max()
+    newest  = da & (order == test_order)
+    earlier = order < test_order
+    pipe = _real_pipeline().fit(X[earlier], y[earlier])
+    pred = pipe.predict(X[newest])
+    r2   = float(r2_score(y[newest], pred))
+    mae  = float(mean_absolute_error(y[newest], pred))
+    rmse = float(np.sqrt(mean_squared_error(y[newest], pred)))
+
+    # Stability: predict each season from a model trained on all the others
+    pooled = np.zeros(len(y))
+    for season in np.unique(order):
+        held = order == season
+        pooled[held] = _real_pipeline().fit(X[~held], y[~held]).predict(X[held])
+    loso_r2, loso_mae = float(r2_score(y, pooled)), float(mean_absolute_error(y, pooled))
+
+    # Serve the model fitted on every season
+    final = _real_pipeline().fit(X, y)
+    path = new_model_path()
+    joblib.dump({'kind': 'real', 'pipeline': final}, path)
+
+    return {
+        'model_type':       'linear',
+        'r2_score':         round(r2, 4),
+        'mae':              round(mae, 4),
+        'rmse':             round(rmse, 4),
+        'training_samples': int(earlier.sum()),
+        'model_file':       str(path),
+        'is_active':        True,
+        'notes':            (
+            f'Trained on DA Davao del Norte harvest reports ({int(da.sum())} rows) and '
+            f'{int((~da).sum())} harvests recorded in RiceFlow ({len(np.unique(order))} seasons, '
+            f'{X["barangay"].nunique()} barangays). '
+            f'Inputs: seed type, ecosystem, season, municipality, barangay. '
+            f'Test = {label[newest][0]} after training on earlier seasons. '
+            f'Leave-one-season-out R2 = {loso_r2:.4f}, MAE = {loso_mae:.4f} t/ha. '
+            f'Served model is refitted on all seasons.'
+        ),
+    }
+
+
 def _generate_training_data(n_samples: int = 5000) -> tuple:
     """
     Synthetic dataset following documented rice-agronomy relationships.
@@ -162,8 +344,9 @@ def _get_real_training_data():
         scan  = EnvironmentalScan.objects.filter(farm=farm).order_by('-id').first()
         if not scan:
             continue
-        area = float(farm.area_ha or 1.0) if hasattr(farm, 'area_ha') else float(getattr(farm, 'area_hectares', 1.0) or 1.0)
-        y_t_ha = (yr.net_yield_kg / 1000) / max(area, 0.1)
+        # The land actually harvested, not the whole farm (the DA's yield per area harvested)
+        area = float(yr.area_harvested_ha or farm.area_hectares or 1.0)
+        y_t_ha = (dry_yield_kg(yr) / 1000) / max(area, 0.1)
         X_rows.append([
             area,
             float(scan.soil_ph),
@@ -184,13 +367,21 @@ def _get_real_training_data():
     return np.array(X_rows), np.array(y_rows)
 
 
-def train_all_models():
+def train_all_models(csv_path: str | None = None):
     """
     Train the Linear Regression yield model.
 
+    Uses the harvest-report CSV (csv_path, else settings.YIELD_TRAINING_CSV) when
+    it exists; an explicit csv_path that doesn't exist raises FileNotFoundError.
     Returns a single-item list (kept as a list so callers that iterate results
-    keep working) with the test metrics; 5-fold CV results go into notes.
+    keep working) with the test metrics; validation details go into notes.
     """
+    if csv_path and not os.path.exists(csv_path):
+        raise FileNotFoundError(csv_path)
+    csv_path = csv_path or getattr(settings, 'YIELD_TRAINING_CSV', '')
+    if csv_path and os.path.exists(csv_path):
+        return [_train_real(csv_path)]
+
     X_real, y_real = _get_real_training_data()
     if X_real is not None:
         X_raw, y = X_real, y_real
@@ -217,7 +408,7 @@ def train_all_models():
     mae  = float(mean_absolute_error(y_test, y_pred))
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
-    path = MODELS_DIR / 'yield_linear.pkl'
+    path = new_model_path()
     joblib.dump(pipe, path)
 
     return [{
@@ -258,6 +449,20 @@ def predict_yield(features: dict) -> dict:
         print(f'[PREDICT] could not load {active.model_file}: {exc}', flush=True)
         return _heuristic('saved model could not be loaded')
 
+    # Real-harvest model: its own inputs (seed type, ecosystem, season, location)
+    if isinstance(pipe, dict) and pipe.get('kind') == 'real':
+        try:
+            pred = float(pipe['pipeline'].predict(real_features(features))[0])
+        except Exception as exc:
+            print(f'[PREDICT] prediction failed: {exc}', flush=True)
+            return _heuristic('prediction failed')
+        return {
+            'predicted_yield_t_ha': round(max(1.0, min(pred, 12.0)), 2),
+            'model_used':           active.get_model_type_display(),
+            'r2_score':             active.r2_score,
+            'model_id':             active.id,
+        }
+
     X = engineer_features(encode_features(features))
 
     # A model saved before the current feature set was introduced expects a
@@ -285,4 +490,56 @@ def predict_yield(features: dict) -> dict:
         'predicted_yield_t_ha': round(pred, 2),
         'model_used':           active.get_model_type_display(),
         'r2_score':             active.r2_score,
+        'model_id':             active.id,
     }
+
+
+# ── Saved predictions ────────────────────────────────────────────────────────
+
+def fill_features(features: dict, farm=None, variety=None) -> dict:
+    """Fill in what the models need from the farm (barangay, ecosystem) and the variety
+    (seed type, maturity, average yield) where the request didn't send them."""
+    if farm:
+        features.setdefault('barangay', farm.barangay)
+        features.setdefault('ecosystem', farm.ecosystem)
+    if variety:
+        features.setdefault('seed_type', seed_type_for(variety))
+        features.setdefault('maturity_days', variety.maturity_days)
+        features.setdefault('variety_avg_yield', variety.avg_yield_t_ha)
+    return features
+
+
+def features_for_cycle(cycle) -> dict:
+    """A crop's model inputs: its farm, variety and season, plus the farm's latest scan
+    (the older soil-and-climate model reads those)."""
+    farm = cycle.farm
+    scan = farm.scans.order_by('-scanned_at', '-id').first()
+    features = {
+        'season':  cycle.season,
+        'area_ha': cycle.area_planted_ha or float(farm.area_hectares or 1),
+    }
+    if scan:
+        for key, value in (('soil_ph', scan.soil_ph), ('organic_matter', scan.organic_matter),
+                           ('avg_temperature', scan.avg_temperature),
+                           ('seasonal_rainfall', scan.seasonal_rainfall_mm),
+                           ('humidity', scan.humidity_pct), ('elevation_m', scan.elevation_m),
+                           ('flood_risk', scan.flood_risk)):
+            if value is not None:
+                features[key] = value
+    return fill_features(features, farm, cycle.variety)
+
+
+def save_prediction(cycle, result: dict):
+    """Keep a prediction for a crop that has not been harvested yet: one row per crop
+    per model, updated when it is asked again. A prediction made after the harvest is
+    recorded is not saved, so every saved one can be compared with the harvest fairly."""
+    from apps.predictions.models import YieldPrediction, YieldPredictionModel
+
+    if cycle is None or hasattr(cycle, 'yield_record'):
+        return None
+    model = YieldPredictionModel.objects.filter(pk=result.get('model_id')).first()
+    prediction, _ = YieldPrediction.objects.update_or_create(
+        farm_cycle=cycle, model=model,
+        defaults={'predicted_t_ha': result['predicted_yield_t_ha']},
+    )
+    return prediction

@@ -1,5 +1,7 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import requests
+from django.db import IntegrityError
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -7,11 +9,39 @@ from rest_framework import status
 from apps.farms.models import Farm
 from .models import EnvironmentalScan
 from .serializers import EnvironmentalScanSerializer
-from .services.openmeteo import get_current_weather, get_annual_rainfall, get_elevation
+from .services.openmeteo import (
+    MONTHLY_YEARS, current_season, get_current_weather, get_elevation, get_monthly_rainfall,
+    get_rainfall_summary,
+)
 from .services.soilgrids import get_soil_data
 from .services.cache import cached, location_key
+from .services.sampling import combine_soil, sample_points
+from .services.soil_series import soil_series_at
 
 WEATHER_CACHE_TTL = 10 * 60
+
+
+class MonthlyRainfallView(APIView):
+    """
+    GET /api/environmental/monthly-rainfall/?lat=&lng=
+    Average rain per calendar month (mm, Jan..Dec) at the point over the last 3 full
+    years, from the Open-Meteo archive. The planting calendar is built from this.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            lat = float(request.query_params.get('lat'))
+            lng = float(request.query_params.get('lng'))
+        except (TypeError, ValueError):
+            return Response({'error': 'lat and lng query params are required'}, status=400)
+        try:
+            months = get_monthly_rainfall(lat, lng)
+        except requests.RequestException:
+            return Response({'error': 'Rainfall data is unavailable right now.'}, status=503)
+        from datetime import date
+        last = date.today().year - 1
+        return Response({'months': months, 'years': f'{last - MONTHLY_YEARS + 1}-{last}'})
 
 
 class WeatherForecastView(APIView):
@@ -37,14 +67,17 @@ class WeatherForecastView(APIView):
                     'latitude':  lat,
                     'longitude': lng,
                     'current':   'temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m',
-                    'hourly':    'temperature_2m,weather_code,precipitation,precipitation_probability',
-                    'forecast_days': 2,
+                    'hourly':    'temperature_2m,weather_code,precipitation,precipitation_probability,'
+                                 'wind_speed_10m',
+                    'forecast_days': 3,     # the outlook looks 48 hours ahead
                     'timezone':  'Asia/Manila',
                 },
                 timeout=10,
             )
             r.raise_for_status()
-            return r.json()
+            data = r.json()
+            data['fetched_at'] = timezone.now().isoformat()
+            return data
 
         try:
             # 2 decimal places is about 1 km, finer than Open-Meteo's forecast grid
@@ -96,9 +129,26 @@ class WeatherForecastView(APIView):
                 'rain_pct':       round(rain_pct),
             },
             'hourly': next_hourly,
+            'outlook': weather_outlook(h, start_idx),
+            'fetched_at': data.get('fetched_at'),
         })
         response['X-Cache'] = 'HIT' if hit else 'MISS'
         return response
+
+
+def weather_outlook(hourly: dict, start: int) -> dict:
+    """Rain and wind ahead of the current hour, for the planting guide's weather advice:
+    total rain (mm) and highest rain chance (%) in the next 6, 24 and 48 hours, and the
+    strongest wind (km/h) in the next 12."""
+    def window(name, hours):
+        return [v for v in hourly.get(name, [])[start:start + hours] if v is not None]
+
+    out = {}
+    for hours in (6, 24, 48):
+        out[f'rain_mm_{hours}h'] = round(sum(window('precipitation', hours)), 1)
+        out[f'rain_prob_{hours}h'] = max(window('precipitation_probability', hours), default=0)
+    out['wind_kph_max_12h'] = round(max(window('wind_speed_10m', 12), default=0))
+    return out
 
 WEATHER_FALLBACK = {
     'avg_temperature': 27.0, 'temp_at_flowering': 27.0,
@@ -110,6 +160,9 @@ SOIL_FALLBACK = {
     'drainage': 'moderately drained', 'cec': 20.0,
     'nitrogen_ppm': 15.0, 'bulk_density': 1.3,
 }
+
+
+SOIL_WAIT_S = 20
 
 
 def _safe(fn, *args, fallback=None):
@@ -131,17 +184,42 @@ class ScanFarmView(APIView):
         lat = float(farm.latitude)
         lon = float(farm.longitude)
 
-        # Run all external API calls in parallel with individual fallbacks
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
-            f_annual    = ex.submit(_safe, get_annual_rainfall,  lat, lon, fallback=1800.0)
-            f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
-            f_soil      = ex.submit(_safe, get_soil_data,         lat, lon, fallback=SOIL_FALLBACK)
+        # Soil is read at several points across the farm's area (see services/sampling.py);
+        # weather, rainfall and elevation at the pin. All calls run in parallel with fallbacks.
+        points = sample_points(lat, lon, farm.area_hectares)
+        ex = ThreadPoolExecutor(max_workers=3 + len(points))
+        f_weather   = ex.submit(_safe, get_current_weather, lat, lon, fallback=WEATHER_FALLBACK)
+        f_rain      = ex.submit(_safe, get_rainfall_summary, lat, lon)
+        f_elevation = ex.submit(_safe, get_elevation,         lat, lon, fallback=10.0)
+        f_soils     = [ex.submit(_safe, get_soil_data, p_lat, p_lon) for p_lat, p_lon in points]
+        # SoilGrids can hang for most of a minute. The scan waits SOIL_WAIT_S for it, then
+        # goes on with the points that answered; a slower point still finishes in the
+        # background and fills the cache for the next scan.
+        wait(f_soils, timeout=SOIL_WAIT_S)
+        ex.shutdown(wait=False)
 
         weather   = f_weather.result()
-        annual    = f_annual.result()
+        rain      = f_rain.result()
+        # Seasonal rainfall = rain in this season's months over the last year (the RSI rule and
+        # the yield model expect a whole season, about 1,000-1,500 mm), not this week x 4
+        season = current_season()
+        annual   = rain['annual'] if rain else 1800.0
+        seasonal = rain[f'{season}_season'] if rain else annual / 2
         elevation = f_elevation.result()
-        soil      = f_soil.result()
+        # Failed points, and points still waiting on SoilGrids, are skipped
+        soil_samples = [s for s in (f.result() for f in f_soils if f.done()) if s]
+        if soil_samples:
+            soil, soil_sampling = combine_soil(soil_samples)
+        else:
+            soil = SOIL_FALLBACK
+            soil_sampling = {'points': 0, 'points_without_data': 0, 'estimated': True, 'source': 'default',
+                             'ph_range': None, 'clay_pct_range': None, 'varies': False, 'message': ''}
+
+        # BSWM's soil survey names the texture at the pin; it is measured, so it replaces
+        # the SoilGrids estimate (or the default when SoilGrids is down)
+        series = soil_series_at(lat, lon)
+        if series and series['texture']:
+            soil = {**soil, 'texture': series['texture']}
 
         slope = request.data.get('slope_pct', farm.slope_pct or 1.0)
 
@@ -150,32 +228,43 @@ class ScanFarmView(APIView):
             farm.ecosystem == 'rainfed_lowland' and elevation < 50
         ) else 'Low'
 
-        scan = EnvironmentalScan.objects.create(
-            farm=farm,
-            soil_ph=soil['ph'],
-            soil_texture=soil['texture'],
-            organic_matter=soil['organic_matter'],
-            drainage=soil['drainage'],
-            cec=soil['cec'],
-            nitrogen_ppm=soil['nitrogen_ppm'],
-            bulk_density=soil['bulk_density'],
-            avg_temperature=weather['avg_temperature'],
-            temp_at_flowering=weather['temp_at_flowering'],
-            annual_rainfall_mm=annual,
-            seasonal_rainfall_mm=weather['weekly_rainfall_mm'] * 4,
-            humidity_pct=weather['humidity_pct'],
-            solar_radiation=weather['solar_radiation'],
-            wind_speed_ms=weather['wind_speed_ms'],
-            sunshine_hours=weather['sunshine_hours'],
-            elevation_m=elevation,
-            slope_pct=slope,
-            flood_risk=flood_risk,
-        )
+        # The scan takes a while; the app may have given up and deleted the farm meanwhile
+        if not Farm.objects.filter(pk=farm.pk).exists():
+            return Response({'error': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            scan = EnvironmentalScan.objects.create(
+                farm=farm,
+                soil_ph=soil['ph'],
+                soil_texture=soil['texture'],
+                soil_series=series['description'] if series else '',
+                soil_source=soil_sampling['source'],
+                organic_matter=soil['organic_matter'],
+                drainage=soil['drainage'],
+                cec=soil['cec'],
+                nitrogen_ppm=soil['nitrogen_ppm'],
+                bulk_density=soil['bulk_density'],
+                avg_temperature=weather['avg_temperature'],
+                temp_at_flowering=weather['temp_at_flowering'],
+                annual_rainfall_mm=annual,
+                seasonal_rainfall_mm=seasonal,
+                humidity_pct=weather['humidity_pct'],
+                solar_radiation=weather['solar_radiation'],
+                wind_speed_ms=weather['wind_speed_ms'],
+                sunshine_hours=weather['sunshine_hours'],
+                elevation_m=elevation,
+                slope_pct=slope,
+                flood_risk=flood_risk,
+            )
+        except IntegrityError:
+            # Deleted in the moment between the check and the save
+            return Response({'error': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         farm.elevation_m = elevation
         farm.save(update_fields=['elevation_m'])
 
-        return Response(EnvironmentalScanSerializer(scan).data, status=status.HTTP_201_CREATED)
+        data = EnvironmentalScanSerializer(scan).data
+        data['soil_sampling'] = soil_sampling  # points read, pH/clay ranges, 'varies' warning
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class ScanHistoryView(APIView):
