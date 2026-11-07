@@ -74,7 +74,7 @@ Open http://localhost:8080. Only that port is published: nginx serves the React 
 |---|---|---|
 | [CI](.github/workflows/ci.yml) | Every push and PR | ruff, missing-migration check, tests on Postgres + Redis, coverage report, `check --deploy`, pip-audit, gitleaks |
 | [CodeQL](.github/workflows/codeql.yml) | Pushes to `main`/`develop`, PRs, weekly | Static security analysis |
-| [CD](.github/workflows/cd.yml) | After CI passes on `main` | Builds the Docker image, pushes it to GHCR, deploys to Render, waits for `/api/health/` to report the new commit |
+| [CD](.github/workflows/cd.yml) | After CI passes on `main` | Builds the Docker image, pushes it to GHCR, deploys it to the Azure VM over SSH (see [deploy/](deploy/README.md)), waits for `/api/health/` to report the new commit |
 | [Dependabot](.github/dependabot.yml) | Weekly | Update PRs for pip, Docker, and GitHub Actions |
 
 Secrets (`SECRET_KEY`, `DATABASE_URL`, `GEMINI_API_KEY`, Supabase keys) live in `.env` locally and in the host's environment settings in production. They are never committed.

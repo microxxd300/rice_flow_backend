@@ -16,7 +16,9 @@ ARG GIT_SHA=dev
 ENV GIT_SHA=${GIT_SHA}
 
 # Strip Windows line endings in case the repo was checked out with CRLF
+# models/trained, media and data exist (owned by app) so the server's volumes mounted there start writable
 RUN sed -i 's/\r$//' docker/entrypoint.sh \
+    && mkdir -p models/trained media data \
     && useradd --create-home app \
     && chown -R app /app
 USER app

@@ -6,7 +6,8 @@ python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
 # Model files are not in git or the image: train them on first start (a few seconds)
-[ -f models/trained/yield_linear.pkl ] || python manage.py train_yield_models
+# Each training saves its own timestamped file (yield_linear_<time>_<id>.pkl), so look for any
+ls models/trained/yield_linear*.pkl >/dev/null 2>&1 || python manage.py train_yield_models
 [ -f models/trained/kmeans.pkl ] || python manage.py train_cluster_models
 
 exec gunicorn config.wsgi:application \

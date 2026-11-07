@@ -1,2 +1,6 @@
 # Shell scripts run inside Linux containers and must keep LF line endings
 *.sh text eol=lf
+
+# Files run or read on the Linux server keep Linux line endings
+*.sh text eol=lf
+deploy/** text eol=lf
