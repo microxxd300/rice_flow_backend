@@ -967,19 +967,38 @@ Content-Type: application/json
 }
 ```
 
-### See all trained model stats (R², MAE, RMSE)
+Optional `farm_id`, `variety_id` and `cycle_id` fill in the farm's barangay and
+ecosystem and the variety's seed type. With a `farm_id` (your own farm), the
+prediction is also **saved** for that farm's newest crop (or `cycle_id`) as a
+`YieldPrediction`, linked to the model that made it: one row per crop per model,
+updated when asked again. Nothing is saved once the crop's harvest is recorded,
+so every saved prediction can be compared fairly with the harvest.
+
+### See every training (R², MAE, RMSE)
 ```
 GET https://doing-haven-requisite.ngrok-free.dev/api/predictions/models/
 Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
+Every training is kept, newest first; `is_active: true` marks the one in use.
+`harvests_seen` is how many RiceFlow harvests that training learned from.
 
-### Retrain all models (admin only)
+### Retrain now (admin only)
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/predictions/train/
 Authorization: Bearer <ADMIN_TOKEN>
 ngrok-skip-browser-warning: true
 ```
+The new model is used from then on. Older trainings are kept (each with its own
+model file) so saved predictions still point to the model that made them.
+
+### Automatic retraining
+After **5 new harvests** are recorded in RiceFlow (counted from the last training),
+the model retrains in the background on all the data. The new model is used only if
+its error on the DA test season is not worse than the current model's (MAE within 2%);
+otherwise it is kept, inactive, with a note, and the current model stays in use. Each
+automatic retrain is written to the change log as `model.auto_trained` by
+`RiceFlow` (role `system`). The first model is always trained by the admin.
 
 ---
 
@@ -1072,6 +1091,9 @@ Content-Type: application/json
 ```
 Creating the yield record (POST) marks the cycle `completed` and sets its
 `actual_harvest_date`, so the farm's next recommendation starts a new cycle.
+Just before saving, the yield model's prediction for the crop is saved (so the
+harvest can be compared with it), and the 5th new harvest since the last training
+starts an automatic retrain (see Yield Prediction).
 Use PATCH on the same URL to correct a saved record.
 
 ---

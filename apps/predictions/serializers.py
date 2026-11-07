@@ -11,6 +11,6 @@ class YieldPredictionModelSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'model_type', 'model_type_display',
             'r2_score', 'mae', 'rmse',
-            'training_samples', 'is_active',
+            'training_samples', 'harvests_seen', 'is_active',
             'trained_at', 'notes',
         ]

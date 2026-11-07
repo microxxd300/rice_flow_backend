@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.accounts.permissions import IsSuperUser, can_see_contacts
 from apps.activity.record import display_name, log_change, notify_cycle_removed
+from apps.predictions.history import after_harvest_recorded
+from apps.predictions.services import features_for_cycle, predict_yield, save_prediction
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
 from .stages import growth_stages, stage_today
@@ -170,7 +172,12 @@ class YieldRecordView(APIView):
         data = {**request.data, 'farm_cycle': cycle.id}
         serializer = YieldRecordSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
+        # What the model predicts for this crop just before its harvest is recorded, kept
+        # so the harvest can be compared with it (and before any retrain learns from it)
+        save_prediction(cycle, predict_yield(features_for_cycle(cycle)))
         record = serializer.save()
+        # Enough new harvests retrain the yield model in the background
+        after_harvest_recorded()
         # A harvest ends the season, so the farm's next recommendation can start a new cycle
         cycle.status = 'completed'
         cycle.actual_harvest_date = record.harvest_date

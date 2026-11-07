@@ -6,15 +6,17 @@ from apps.accounts.permissions import IsSuperUser
 from apps.activity.record import log_change
 
 from apps.farms.models import Farm
+from apps.progress.models import FarmCycle
 from apps.varieties.models import RiceVariety
 
+from .history import save_training
 from .models import YieldPredictionModel
 from .serializers import YieldPredictionModelSerializer
-from .services import train_all_models, predict_yield, seed_type_for
+from .services import train_all_models, predict_yield, fill_features, save_prediction
 
 
 class ModelComparisonView(APIView):
-    """GET /api/predictions/models/ — list all trained model results."""
+    """GET /api/predictions/models/ — every training, newest first; is_active marks the one in use."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -23,16 +25,12 @@ class ModelComparisonView(APIView):
 
 
 class TrainModelsView(APIView):
-    """POST /api/predictions/train/ — retrain all 3 models (admin only)."""
+    """POST /api/predictions/train/ — retrain the yield model now (admin only). The new
+    model is used from now on; older trainings are kept for their saved predictions."""
     permission_classes = [IsSuperUser]
 
     def post(self, request):
-        results = train_all_models()
-
-        # Clear old records, save new ones
-        YieldPredictionModel.objects.all().delete()
-        for r in results:
-            YieldPredictionModel.objects.create(**r)
+        save_training(train_all_models())
 
         models = YieldPredictionModel.objects.all()
         log_change(request.user, 'model.trained', 'retrained the yield prediction models')
@@ -48,6 +46,9 @@ class PredictYieldView(APIView):
 
     Optional farm_id and variety_id fill in what the real-harvest model needs
     (barangay, ecosystem, seed type) when the request doesn't send them.
+
+    With a farm, the prediction is also saved for the farm's current crop (or cycle_id),
+    so its harvest can later be compared with what was predicted.
     """
     permission_classes = [IsAuthenticated]
 
@@ -56,16 +57,18 @@ class PredictYieldView(APIView):
 
         farm = Farm.objects.filter(pk=features.get('farm_id'), user=request.user).first() \
             if str(features.get('farm_id') or '').isdigit() else None
-        if farm:
-            features.setdefault('barangay', farm.barangay)
-            features.setdefault('ecosystem', farm.ecosystem)
-
         variety = RiceVariety.objects.filter(pk=features.get('variety_id')).first() \
             if str(features.get('variety_id') or '').isdigit() else None
-        if variety:
-            features.setdefault('seed_type', seed_type_for(variety))
-            features.setdefault('maturity_days', variety.maturity_days)
-            features.setdefault('variety_avg_yield', variety.avg_yield_t_ha)
+        fill_features(features, farm, variety)
 
         result = predict_yield(features)
+
+        if farm:
+            cycles = FarmCycle.objects.filter(farm=farm)
+            cycle_id = features.get('cycle_id')
+            cycle = (cycles.filter(pk=cycle_id).first() if str(cycle_id or '').isdigit()
+                     else cycles.order_by('-created_at', '-id').first())
+            save_prediction(cycle, result)
+
+        result.pop('model_id', None)
         return Response(result, status=status.HTTP_200_OK)
