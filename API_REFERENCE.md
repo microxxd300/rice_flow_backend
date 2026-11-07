@@ -934,6 +934,86 @@ newer ones. The app checks this when it opens and puts them in the bell.
 
 ---
 
+## 🩺 Problem advice (booklets + AI) — `apps/advice/`
+
+The advice for a field problem comes from official PhilRice / PalayCheck booklets
+(`apps/advice/knowledge.py`): 9 problems plus "Not sure", every line in English,
+Filipino and Bisaya with its booklet and page. The AI never adds advice: it matches the
+farmer's words to a problem on the list, and explains that problem's cards for the farm.
+Every AI point must name the cards it used; plain code rejects an answer that cites a card
+it was not given, names a chemical or a dose, or brings in another problem. Then (or with
+no AI at all) the farmer still gets the booklet card. Matching and explaining share the
+farmer's daily AI limit with the chat (`AI_CHAT_DAILY_LIMIT`) and its `ai_chat` throttle.
+
+### List the problems (for the picker)
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/advice/problems/?language=ceb
+Authorization: Bearer <TOKEN>
+```
+`[{"key": "stem_borer", "category": "pest", "name": "Stem borer (aksip)", "hint": "..."}, ..., {"key": "unknown", ...}]`
+Keys: `rats`, `stem_borer`, `black_bug`, `planthopper`, `golden_apple_snail`, `blast`,
+`bacterial_leaf_blight`, `sheath_blight`, `tungro`, `unknown` (always last).
+
+### The booklet card (no AI; always works)
+```
+GET https://doing-haven-requisite.ngrok-free.dev/api/advice/problems/stem_borer/?language=fil
+Authorization: Bearer <TOKEN>
+```
+```json
+{
+  "key": "stem_borer", "category": "pest", "name": "Aksip (stem borer)",
+  "identify":     [{"text": "...", "sources": [{"title": "Harmful Organisms in Philippine Rice Fields", "publisher": "PhilRice", "pages": "chart", "url": "..."}]}],
+  "serious_when": {"text": "...", "sources": [{"title": "PalayCheck System ...", "pages": "p. 48", ...}]},
+  "do_now":       [{"text": "...", "sources": [...]}],
+  "dont":         [{"text": "...", "sources": [...]}],
+  "next_season":  [{"text": "...", "sources": [...]}],
+  "get_help":     {"text": "... text PhilRice at 0917-111-7423.", "sources": []},
+  "urgent":       "Severe problem reported. ...",
+  "checked_by_validator": false
+}
+```
+`serious_when` is `null` for `unknown`. Show `urgent` when the farmer marks the problem as severe.
+
+### Match the farmer's own words
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/advice/match/
+Authorization: Bearer <TOKEN>
+Content-Type: application/json
+
+{ "text": "naay mga uhay nga puti ug walay sulod", "language": "ceb" }
+```
+`{"matches": [{"key": "stem_borer", "name": "Stem borer (aksip)", "why": "..."}], "ai_used": true}`
+At most 3, best first, only keys from the list. Without the AI, the problem names and local
+words in the text decide (`ai_used: false`, `why` empty); `matches` can be empty. The farmer
+confirms one. `400` when `text` is empty.
+
+### Explain a problem for this farm
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/advice/explain/
+Authorization: Bearer <TOKEN>
+Content-Type: application/json
+
+{ "problem": "stem_borer", "language": "ceb", "farm": 12, "question": "Unsay akong buhaton karon?" }
+```
+`farm` and `question` are optional. The farm's stage, current guide step and weather come
+from the same summary the chat uses.
+```json
+{
+  "problem": "stem_borer", "ai_used": true, "not_covered": false, "note": null,
+  "points": [{"text": "Susiha ang imong uma sayo sa buntag ...", "cards": ["C4"],
+              "sources": [{"title": "PalayCheck System ...", "pages": "p. 48", ...}]}]
+}
+```
+With no checked answer, `points` is `[]`, `ai_used` is `false` and `note` says why:
+`ai_unavailable`, `daily_limit` or `rejected`. Show the booklet card either way.
+`400` for an unknown problem.
+
+### Field logs name the problem
+`POST /api/progress/logs/` takes an optional `problem_key` (a key from the list above).
+It fills `issue_type` from the problem when that is empty; an unknown key is a `400`.
+
+---
+
 ## 📊 Yield Prediction (Linear Regression) — `apps/predictions/`
 
 ### Predict yield from farm features
