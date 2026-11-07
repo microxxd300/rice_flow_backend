@@ -44,9 +44,11 @@ class MatchView(APIView):
 
 
 class ExplainView(APIView):
-    """POST /api/advice/explain/ {problem, language, farm?, question?} — the AI explains the
+    """POST /api/advice/explain/ {problem, language, farm?, question?, log?} — the AI explains the
     problem's booklet cards for this farm. Every point lists its sources; with no checked
-    answer, points is empty and note says why (the app shows the booklet card alone)."""
+    answer, points is empty and note says why (the app shows the booklet card alone).
+    With `log` (the farmer's own problem log), the farmer's observation is the question and
+    a checked answer is saved on the log, so the same problem never asks the AI again."""
     permission_classes = [IsAuthenticated]
     throttle_scope = 'ai_chat'
 
@@ -55,7 +57,20 @@ class ExplainView(APIView):
         if key not in PROBLEMS:
             return Response({'error': 'Unknown problem.'}, status=status.HTTP_400_BAD_REQUEST)
         from apps.ai.context import farmer_context   # the chat's farm summary: stage, step, weather
+        from apps.progress.models import ProgressLog
 
+        lang = _lang(request.data.get('language'))
+        log = None
+        if str(request.data.get('log') or '').isdigit():
+            log = ProgressLog.objects.filter(pk=request.data['log'],
+                                             farm_cycle__farm__user=request.user).first()
+            saved = (log.advice_tip or {}) if log else {}
+            if saved.get('problem') == key and saved.get('language') == lang:
+                return Response(saved)
+        question = request.data.get('question') or (log.observation if log else '')
         farm = farmer_context(request.user, request.data.get('farm'))
-        return Response(services.explain(request.user, key, _lang(request.data.get('language')),
-                                         farm, request.data.get('question') or ''))
+        result = services.explain(request.user, key, lang, farm, question)
+        if log and result.get('ai_used'):
+            log.advice_tip = {**result, 'language': lang}
+            log.save(update_fields=['advice_tip'])
+        return Response(result)

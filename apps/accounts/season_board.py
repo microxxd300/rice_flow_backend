@@ -72,13 +72,14 @@ def season_board(today=None):
             late.append(_row(c.farm, step=step.title, due=step.scheduled_date.isoformat(),
                              days_late=(today - step.scheduled_date).days))
 
-    # Problems farmers logged this week
+    # Problems farmers logged this week and have not marked fixed
     since = today - timedelta(days=PROBLEM_WINDOW_DAYS)
     sev_rank = {'high': 0, 'medium': 1, 'low': 2, '': 3}
     problems = [
         _row(log.farm_cycle.farm, issue=log.issue_type, issue_label=log.get_issue_type_display(),
              severity=log.severity, date=log.log_date.isoformat(), note=(log.observation or '')[:140])
-        for log in ProgressLog.objects.filter(log_date__gte=since, farm_cycle__farm__is_active=True)
+        for log in ProgressLog.objects.filter(log_date__gte=since, farm_cycle__farm__is_active=True,
+                                              resolved_at__isnull=True)
         .exclude(issue_type='').select_related('farm_cycle__farm', 'farm_cycle__farm__user')
     ]
 

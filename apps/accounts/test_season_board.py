@@ -77,6 +77,8 @@ class SeasonBoardTests(TestCase):
         ProgressLog.objects.create(farm_cycle=c, log_date=self.today - timedelta(days=9), observation='old',
                                    issue_type='pest', severity='high')
         ProgressLog.objects.create(farm_cycle=c, log_date=self.today, observation='just a note')
+        ProgressLog.objects.create(farm_cycle=c, log_date=self.today, observation='fixed now', issue_type='pest',
+                                   severity='high', resolved_at=timezone.now())
         problems = self.board()['attention']['problems']
         self.assertEqual(problems['count'], 2)
         self.assertEqual([p['severity'] for p in problems['items']], ['high', 'low'])

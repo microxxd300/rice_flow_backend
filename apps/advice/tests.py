@@ -192,3 +192,58 @@ class ProblemLogTests(TestCase):
 
     def test_an_unknown_problem_is_refused(self):
         self.assertEqual(self.log(problem_key='aliens').status_code, 400)
+
+
+class ProblemLogTipTests(TestCase):
+    """The problem card under the planting guide: the AI tip is asked once per problem."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username='farmer', password='pass12345')
+        farm = Farm.objects.create(user=self.user, name='Mine', barangay='Nanyo', latitude=7.3, longitude=125.68,
+                                   area_hectares=1, ecosystem='irrigated_lowland')
+        cycle = FarmCycle.objects.create(farm=farm, season='wet', year=2026, planting_date=date(2026, 6, 1))
+        self.log = ProgressLog.objects.create(farm_cycle=cycle, log_date=date(2026, 7, 10), problem_key='black_bug',
+                                              issue_type='pest', observation='Daghang itom nga tangaw')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        patcher = mock.patch('apps.ai.context.farmer_context', return_value='Crop at day 40.')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def explain(self, answer):
+        with mock.patch(GEMINI, return_value=answer) as gemini:
+            res = self.client.post('/api/advice/explain/', {'problem': 'black_bug', 'language': 'ceb',
+                                                            'log': self.log.id}, format='json')
+        return res.json(), gemini
+
+    def test_the_tip_is_saved_on_the_log_and_reused(self):
+        first, gemini = self.explain({'points': [{'text': 'Ihapa ang tangaw.', 'cards': ['C3']}]})
+        self.assertTrue(first['ai_used'])
+        self.assertIn('Daghang itom nga tangaw', gemini.call_args[0][1])   # the farmer's own words
+        cache.clear()
+        again, gemini = self.explain({'points': []})
+        gemini.assert_not_called()
+        self.assertEqual(again['points'][0]['text'], 'Ihapa ang tangaw.')
+        self.log.refresh_from_db()
+        self.assertEqual(self.log.advice_tip['problem'], 'black_bug')
+
+    def test_a_failed_tip_is_not_saved(self):
+        self.explain(None)
+        self.log.refresh_from_db()
+        self.assertIsNone(self.log.advice_tip)
+
+    def test_another_farmers_log_is_ignored(self):
+        other = User.objects.create_user(username='other', password='pass12345')
+        self.client.force_authenticate(other)
+        self.explain({'points': [{'text': 'Ihapa ang tangaw.', 'cards': ['C3']}]})
+        self.log.refresh_from_db()
+        self.assertIsNone(self.log.advice_tip)
+
+    def test_okay_na_marks_the_problem_fixed_and_the_tip_cannot_be_written(self):
+        res = self.client.patch(f'/api/progress/logs/{self.log.id}/',
+                                {'resolved_at': '2026-07-12T08:00:00Z', 'advice_tip': {'fake': 1}}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.log.refresh_from_db()
+        self.assertIsNotNone(self.log.resolved_at)
+        self.assertIsNone(self.log.advice_tip)

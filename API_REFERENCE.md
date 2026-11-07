@@ -1009,8 +1009,10 @@ Content-Type: application/json
 
 { "problem": "stem_borer", "language": "ceb", "farm": 12, "question": "Unsay akong buhaton karon?" }
 ```
-`farm` and `question` are optional. The farm's stage, current guide step and weather come
-from the same summary the chat uses.
+`farm`, `question` and `log` are optional. The farm's stage, current guide step and weather
+come from the same summary the chat uses. With `log` (the id of the farmer's own problem
+log), the log's observation is the question, and a checked answer is saved on the log
+(`advice_tip`): the problem card under the planting guide asks the AI only once per problem.
 ```json
 {
   "problem": "stem_borer", "ai_used": true, "not_covered": false, "note": null,
@@ -1025,6 +1027,9 @@ With no checked answer, `points` is `[]`, `ai_used` is `false` and `note` says w
 ### Field logs name the problem
 `POST /api/progress/logs/` takes an optional `problem_key` (a key from the list above).
 It fills `issue_type` from the problem when that is empty; an unknown key is a `400`.
+`PATCH /api/progress/logs/{id}/` with `{"resolved_at": "<ISO time>"}` marks the problem
+fixed ("Okay na"): its card leaves the Guide tab and the admin season board. `advice_tip`
+is read-only (written by the explain endpoint).
 
 ---
 
