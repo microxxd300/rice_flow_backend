@@ -2,9 +2,9 @@
 Clustering Engine — K-Means.
 
 Groups rice varieties by agro-climatic similarity. Each variety becomes a
-9-feature vector; features are standardized; K-Means assigns a cluster label
-that is stored as supplementary metadata on recommendation results (the
-ranking itself is purely RSI).
+9-feature vector; features are standardized; K-Means assigns a cluster label.
+The labels pre-select the varieties for a farm (preselect_varieties); RSI then
+scores and ranks only those.
 
 Training searches k = 2..8 and keeps the k with the best silhouette score,
 using n_init=50 and a fixed random_state so results are stable and
@@ -26,6 +26,9 @@ ECOSYSTEM_MAP = {'irrigated_lowland': 0, 'rainfed_lowland': 1, 'upland': 2}
 # Search range for the number of clusters (upper bound also capped at n-1)
 K_MIN = 2
 K_MAX = 8
+
+# The app shows a top three, so pre-selection never leaves fewer varieties than this
+MIN_PRESELECTED = 3
 
 
 def _build_feature_matrix(varieties):
@@ -119,6 +122,18 @@ def predict_cluster(variety, active_model_name: str = 'kmeans') -> int:
     if hasattr(model, 'predict'):
         return int(model.predict(X_scaled)[0])
     return 0
+
+
+def preselect_varieties(varieties, clusters: dict, ecosystem: str) -> list:
+    """The varieties RSI should score for this kind of farm.
+
+    Keeps every cluster that holds a variety bred for the farm's ecosystem. `clusters` maps
+    variety id to cluster label. All varieties are kept if fewer than MIN_PRESELECTED remain,
+    so a retrained model with small clusters can never cost a farmer their top three.
+    """
+    matching = {clusters[v.id] for v in varieties if v.ecosystem == ecosystem}
+    selected = [v for v in varieties if clusters[v.id] in matching]
+    return selected if len(selected) >= MIN_PRESELECTED else list(varieties)
 
 
 def get_farm_cluster(scan, ecosystem: str, active_model_name: str = 'kmeans') -> int:

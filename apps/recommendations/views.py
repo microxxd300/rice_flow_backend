@@ -11,7 +11,7 @@ from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
 from .models import ClusterModel, Recommendation, RecommendationResult, SuitabilityRuleSet
 from .scoring import calculate_rsi, default_rules_payload
-from .clustering import predict_cluster
+from .clustering import predict_cluster, preselect_varieties
 from .training import train_and_record
 from .fit_explanation import build_fit_explanation
 from .serializers import (
@@ -124,18 +124,19 @@ class GenerateRecommendationView(APIView):
         active_model = ClusterModel.objects.filter(is_active=True).first()
         model_name   = active_model.name if active_model else 'kmeans'
 
-        varieties = RiceVariety.objects.filter(is_active=True)
+        varieties = list(RiceVariety.objects.filter(is_active=True))
+        clusters = {v.id: predict_cluster(v, model_name) if active_model else 0 for v in varieties}
 
+        # K-Means pre-selects the variety groups for this kind of farm; RSI ranks only those
         results = []
-        for variety in varieties:
+        for variety in preselect_varieties(varieties, clusters, ecosystem):
             rsi_data = calculate_rsi(variety, scan, ecosystem)
-            v_cluster = predict_cluster(variety, model_name) if active_model else 0
             results.append({
                 'variety':         variety,
                 'rsi_score':       rsi_data['rsi_score'],
                 'suitability_class': rsi_data['suitability_class'],
                 'factor_scores':   rsi_data['factor_scores'],
-                'variety_cluster': v_cluster,
+                'variety_cluster': clusters[variety.id],
             })
 
         # Equal scores: the higher-yielding variety first, not whichever the database lists first
