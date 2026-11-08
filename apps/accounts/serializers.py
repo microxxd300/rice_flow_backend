@@ -5,6 +5,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User
 
+GMAIL_DOMAINS = {'gmail.com', 'googlemail.com'}
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password  = serializers.CharField(write_only=True, min_length=8)
@@ -17,6 +19,10 @@ class RegisterSerializer(serializers.ModelSerializer):
                   'municipality', 'province']
 
     def validate_email(self, value):
+        # Forgot-password codes go by email, so the address must be a real inbox. Farmers
+        # without Gmail get an account from an agriculturist through the admin site instead.
+        if value.rsplit('@', 1)[-1].lower() not in GMAIL_DOMAINS:
+            raise serializers.ValidationError('Please use a Gmail address (ending in @gmail.com).')
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError('Email already registered.')
         return value
