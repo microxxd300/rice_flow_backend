@@ -13,9 +13,10 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from . import palaycheck
+from . import direct_seeded, palaycheck
 
 SOWING_KEY = 'seedbed'
+SOWING_KEYS = (SOWING_KEY, *direct_seeded.SOWING_KEYS)
 NOT_YET_DAYS = 3
 OLDEST_SOWING_DAYS = 150   # a sowing date further back is a typo, not this crop
 
@@ -30,7 +31,7 @@ def season_label(sowing) -> str:
 
 
 def sowing_step(guide):
-    return guide.steps.filter(template_key=SOWING_KEY).first()
+    return guide.steps.filter(template_key__in=SOWING_KEYS).first()
 
 
 def is_sown(guide) -> bool:
@@ -89,7 +90,7 @@ def confirm_sowing(guide, sown_on, log=None):
         .update(is_completed=True, completed_at=timezone.now())
     if step and log is None and cycle and not step.logs.exists():
         ProgressLog.objects.create(farm_cycle=cycle, log_date=sown_on, guide_step=step,
-                                   observation=palaycheck.text(SOWING_KEY, 'en')['title'])
+                                   observation=palaycheck.text(step.template_key, 'en')['title'])
 
 
 @transaction.atomic
@@ -101,7 +102,7 @@ def postpone_sowing(guide, days=NOT_YET_DAYS):
 def sowing_estimate(step, log_date):
     """The sowing day a later step implies (transplanting 21 days after sowing...), when the
     farmer logs it before saying they sowed; None for steps before sowing."""
-    if not step or step.template_key == SOWING_KEY or (step.days_after_planting or 0) <= 0:
+    if not step or step.template_key in SOWING_KEYS or (step.days_after_planting or 0) <= 0:
         return None
     if is_sown(step.guide):
         return None

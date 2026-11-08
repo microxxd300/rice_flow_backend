@@ -26,15 +26,16 @@ def _current_step(guide, today) -> str:
     the whole guide would spend the free Gemini tokens on every question."""
     step = guide.steps.filter(is_completed=False).order_by('days_after_planting', 'step_no').first()
     if not step:
-        return 'Planting guide: every PalayCheck step is done.'
+        return 'Planting guide: every step is done.'
     due = step.scheduled_date
     when = ('' if not due else f', due {due:%B %d}' if due >= today
             else f', due {due:%B %d} ({(today - due).days} days late)')
     if step.template_key not in palaycheck.TEXT:   # a guide from before PalayCheck
         return f'Current planting-guide step{when}: {_short(step.title)}.'
     words = palaycheck.text(step.template_key, 'en')
-    ref = palaycheck.reference(palaycheck.PAGES[step.template_key])
-    return (f'Current planting-guide step ({ref}, KeyCheck {step.key_check}{when}): '
+    ref = palaycheck.reference_for(step.template_key)
+    kc = f', KeyCheck {step.key_check}' if step.key_check else ''
+    return (f'Current planting-guide step ({ref}{kc}{when}): '
             f'{words["title"]}. {words["instruction"]}')
 
 

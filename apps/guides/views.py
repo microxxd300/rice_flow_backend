@@ -12,7 +12,8 @@ from .serializers import PlantingGuideSerializer, GuideStepSerializer
 from apps.progress.models import YieldRecord
 from apps.recommendations.models import Recommendation
 
-# The planting guide is PalayCheck 2022 (palaycheck.py), not generated text. The farmer works
+# The planting guide is from DA-PhilRice booklets for the farm's type (palaycheck.py,
+# direct_seeded.py), not generated text. The farmer works
 # through it one step at a time; a step is done when they log it (or tick it in Upcoming Tasks).
 VALID_GUIDE_LANGS = set(palaycheck.LANGUAGES)
 
@@ -22,7 +23,7 @@ def _step_dict(st, language):
     (Gemini text, no template key) keep their saved text until the guide is rebuilt."""
     if st.template_key in palaycheck.TEXT:
         words = palaycheck.text(st.template_key, language)
-        ref = palaycheck.reference(palaycheck.PAGES[st.template_key])
+        ref = palaycheck.reference_for(st.template_key)
     else:
         words = {'title': st.title, 'instruction': st.description, 'explanation': ''}
         ref = ''
@@ -35,7 +36,7 @@ def _step_dict(st, language):
         'instruction':       words['instruction'],
         'explanation':       words['explanation'],
         'reference':         ref,
-        'referenceUrl':      palaycheck.REFERENCE_URL if ref else '',
+        'referenceUrl':      palaycheck.reference_url_for(st.template_key) if ref else '',
         'daysAfterPlanting': st.days_after_planting if st.days_after_planting is not None else 0,
         'category':          st.category or 'planting',
         'is_completed':      st.is_completed,
@@ -52,7 +53,7 @@ def _guide_response(guide, source, language):
         'language':   language,
         'start_date': guide.start_date.isoformat() if guide.start_date else None,
         'source':     source,
-        'reference':  palaycheck.REFERENCE,
+        'reference':  palaycheck.book_title(guide.farm.ecosystem),
         'steps':      steps,
     }
 
@@ -74,7 +75,7 @@ def _build_steps(guide, variety):
                 category=st['category'], days_after_planting=st['day'],
                 scheduled_date=(guide.start_date + timedelta(days=st['day'])) if guide.start_date else None,
             )
-            for n, st in enumerate(palaycheck.plan(variety.maturity_days), start=1)
+            for n, st in enumerate(palaycheck.plan(variety.maturity_days, guide.farm.ecosystem), start=1)
         ])
 
 
