@@ -170,6 +170,8 @@ REST_FRAMEWORK = {
         'user': '3000/hour',
         'login': '10/min',      # per IP: slows password guessing
         'register': '10/hour',  # per IP: stops mass sign-ups
+        'password_reset': '10/hour',          # per IP: forgot-password emails
+        'password_reset_confirm': '20/hour',  # per IP: code guesses
         'ai_chat': '60/hour',   # per user: burst cap; AI_CHAT_DAILY_LIMIT caps answers a day
     },
     # Proxies in front of Django (nginx, Render, ngrok) so throttles use the real client IP
@@ -188,6 +190,18 @@ AI_CHAT_DAILY_LIMIT = int(os.getenv('AI_CHAT_DAILY_LIMIT', '15'))
 # without the booklets, as before. BOOKLETS_DIR holds the PDFs it uploads.
 GEMINI_FILE_SEARCH_STORE = os.getenv('GEMINI_FILE_SEARCH_STORE', '').strip()
 BOOKLETS_DIR = os.getenv('BOOKLETS_DIR', str(BASE_DIR / 'booklets'))
+
+# Email (forgot-password codes) goes out through Resend. Printing to the console is for
+# local work only, because in production it would put the codes in the logs.
+EMAIL_HOST_PASSWORD = os.getenv('RESEND_API_KEY', '').strip()
+EMAIL_BACKEND = ('django.core.mail.backends.console.EmailBackend' if DEBUG and not EMAIL_HOST_PASSWORD
+                 else 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = 'smtp.resend.com'
+EMAIL_HOST_USER = 'resend'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_TIMEOUT = 15
+DEFAULT_FROM_EMAIL = 'RiceFlow <noreply@riceflow.me>'
 
 # JWT
 SIMPLE_JWT = {
