@@ -191,8 +191,8 @@ class RegisterWithoutBarangayTests(TestCase):
         from rest_framework.test import APIClient
         from apps.accounts.models import User
         r = APIClient().post('/api/auth/register/', {
-            'email': 'new@georice.app', 'password': 'Palay-Tanim-2026', 'password2': 'Palay-Tanim-2026',
+            'email': 'new@gmail.com', 'password': 'Palay-Tanim-2026', 'password2': 'Palay-Tanim-2026',
             'first_name': 'Ana', 'last_name': 'Cruz', 'barangay': 'Gredu'}, format='json')
         self.assertEqual(r.status_code, 201, r.content)
-        user = User.objects.get(email='new@georice.app')
+        user = User.objects.get(email='new@gmail.com')
         self.assertEqual((user.barangay, user.municipality, user.province), ('', 'Panabo City', 'Davao del Norte'))

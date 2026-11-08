@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import User
 
-REGISTER = {'email': 'juan@x.com', 'first_name': 'Juan', 'last_name': 'Cruz',
+REGISTER = {'email': 'juan@gmail.com', 'first_name': 'Juan', 'last_name': 'Cruz',
             'barangay': 'Gredu', 'municipality': 'Panabo City', 'province': 'Davao del Norte'}
 
 
@@ -22,7 +22,7 @@ class PasswordTests(TestCase):
 
     def test_new_passwords_are_hashed_with_argon2(self):
         self.assertEqual(self.register('tanim-palay-2026').status_code, 201)
-        self.assertTrue(User.objects.get(email='juan@x.com').password.startswith('argon2$'))
+        self.assertTrue(User.objects.get(email='juan@gmail.com').password.startswith('argon2$'))
 
     def test_register_rejects_common_and_numeric_passwords(self):
         for weak in ('password123', '12345678901'):

@@ -36,3 +36,13 @@ Without `AZURE_VM_HOST` the image is still built and pushed, and the deploy is s
 
 Every night at 2 AM the database is saved to `/opt/riceflow/backups/` (7 days kept).
 Restore one: `gunzip -c backups/riceflow-YYYY-MM-DD.sql.gz | docker compose -f docker-compose.prod.yml exec -T db psql -U riceflow riceflow`.
+
+At 2:30 AM `upload-backup.sh` copies the newest backup to the private S3 bucket `riceflow-db-backups-2026`
+(Sydney, versioning on) and checks that S3 stored the same bytes. Results go to `/opt/riceflow/upload-backup.log`.
+
+On a new VM: copy `upload-backup.sh` to `/opt/riceflow/` (`chmod 700`), create `.aws-backup.env` (mode 600) with
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and add this to the `riceflow` user's crontab:
+`30 2 * * * /opt/riceflow/upload-backup.sh >> /opt/riceflow/upload-backup.log 2>&1`.
+
+The key can only upload, so to restore from S3 download the file in the AWS console and copy it to `backups/`.
+The AWS free plan ends on 2027-05-08: move the backups off it before then.
