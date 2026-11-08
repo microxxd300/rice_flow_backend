@@ -79,6 +79,22 @@ class LoginSerializer(serializers.Serializer):
         }
 
 
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    email         = serializers.EmailField()
+    code          = serializers.RegexField(r'^\d{6}$', error_messages={'invalid': 'Enter the 6-digit code.'})
+    new_password  = serializers.CharField(write_only=True)
+    new_password2 = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        if data['new_password'] != data['new_password2']:
+            raise serializers.ValidationError({'new_password': 'Passwords do not match.'})
+        return data
+
+
 class UserSerializer(serializers.ModelSerializer):
     has_farm = serializers.SerializerMethodField()
 

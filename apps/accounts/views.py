@@ -14,7 +14,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from .permissions import IsSuperUser
 from apps.activity.record import diff, display_name, field_list, log_change, role_of
 from config.exceptions import client_ip, security_log
-from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
+from . import password_reset
+from .serializers import (
+    RegisterSerializer, LoginSerializer, UserSerializer,
+    PasswordResetRequestSerializer, PasswordResetConfirmSerializer,
+)
 from apps.progress.stages import growth_stages, stage_today
 
 User = get_user_model()
@@ -42,6 +46,39 @@ class LoginView(APIView):
             return Response(serializer.validated_data, status=status.HTTP_200_OK)
         security_log.warning('login failed email=%s ip=%s', request.data.get('email'), client_ip(request))
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetRequestView(APIView):
+    """POST /api/auth/password-reset/request/: email a 6-digit code to the account."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_scope = 'password_reset'
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        password_reset.send_code(serializer.validated_data['email'])
+        return Response({'detail': 'If that email is registered, a code is on its way.'})
+
+
+class PasswordResetConfirmView(APIView):
+    """POST /api/auth/password-reset/confirm/: the emailed code sets a new password."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_scope = 'password_reset_confirm'
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        errors = password_reset.reset_password(data['email'], data['code'], data['new_password'])
+        if errors:
+            security_log.warning('password reset failed email=%s ip=%s', data['email'], client_ip(request))
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        security_log.info('password reset done email=%s ip=%s', data['email'], client_ip(request))
+        return Response({'detail': 'Your password has been changed. You can log in now.'})
 
 
 class ProfileView(APIView):

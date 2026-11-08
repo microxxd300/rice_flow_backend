@@ -60,6 +60,8 @@ Requests are rate limited. Wait the number of seconds in the `Retry-After` respo
 |---|---|
 | Login | 10 per minute per IP |
 | Register | 10 per hour per IP |
+| Forgot password: send code | 10 per hour per IP |
+| Forgot password: enter code | 20 per hour per IP |
 | AI chat | 60 per hour per user |
 | Anything else | 300 per hour logged out, 3000 per hour logged in |
 
@@ -502,6 +504,28 @@ province are always Panabo City and Davao del Norte.
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/auth/login/
 (See Section 1 above for full step-by-step)
+```
+
+### Forgot password
+No token needed. Step 1 emails a 6-digit code to the account. The reply is the same whether or not
+the email is registered.
+```
+POST /api/auth/password-reset/request/
+{ "email": "juan@example.com" }
+
+200 { "detail": "If that email is registered, a code is on its way." }
+```
+
+Step 2 sets the new password. A code lasts 10 minutes and 5 wrong tries, and only the newest code
+works. An account gets at most one code a minute and 5 a day. Success logs the account out on
+every device.
+```
+POST /api/auth/password-reset/confirm/
+{ "email": "juan@example.com", "code": "123456", "new_password": "...", "new_password2": "..." }
+
+200 { "detail": "Your password has been changed. You can log in now." }
+400 { "code": ["That code is wrong or has expired. Please request a new one."] }
+400 { "new_password": ["This password is too common."] }
 ```
 
 ### Get current user profile
