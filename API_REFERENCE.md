@@ -264,7 +264,7 @@ https://doing-haven-requisite.ngrok-free.dev/api/auth/register/
 **Body (raw → JSON):**
 ```json
 {
-  "email":        "panel.demo@georice.app",
+  "email":        "your.name@gmail.com",
   "password":     "Panel1234!",
   "password2":    "Panel1234!",
   "first_name":   "Panel",
@@ -490,13 +490,15 @@ Content-Type: application/json
 ngrok-skip-browser-warning: true
 
 {
-  "email":        "juan@example.com",
+  "email":        "your.name@gmail.com",
   "password":     "strongpassword",
   "password2":    "strongpassword",
   "first_name":   "Juan",
   "last_name":    "Dela Cruz"
 }
 ```
+Sign-up takes Gmail addresses only (`@gmail.com` or `@googlemail.com`); anything else returns `400` on `email`. Staff can still create other accounts from the admin site.
+
 No barangay at sign-up: the farmer's barangay is taken from their first farm pin. City and
 province are always Panabo City and Davao del Norte.
 
