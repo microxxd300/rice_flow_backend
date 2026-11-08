@@ -109,7 +109,7 @@ class ProgressLogSerializer(serializers.ModelSerializer):
             step.is_completed = True
             step.completed_at = timezone.now()
             step.save(update_fields=['is_completed', 'completed_at'])
-        if step and step.template_key == sowing.SOWING_KEY:
+        if step and step.template_key in sowing.SOWING_KEYS:
             # The sowing log is the real sowing day: the whole plan moves to it
             sowing.confirm_sowing(step.guide, log.log_date, log=log)
         else:

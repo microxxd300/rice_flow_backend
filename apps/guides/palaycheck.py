@@ -12,6 +12,8 @@ The English summaries keep PalayCheck's numbers. The Filipino and Bisaya text, a
 validator before the defense.
 """
 
+from . import direct_seeded
+
 REFERENCE = 'PalayCheck System 2022 Revised Edition (DA-PhilRice)'
 REFERENCE_URL = 'https://www.philrice.gov.ph/wp-content/uploads/2023/02/PalayCheck-System-2022-Revised-Edition.pdf'
 
@@ -61,8 +63,15 @@ def _days(maturity: int) -> dict:
     }
 
 
-def plan(maturity_days) -> list:
-    """The guide steps for a variety, in order: [{key, key_check, category, pages, day}, ...]."""
+def plan(maturity_days, ecosystem=None) -> list:
+    """The guide steps for a variety on this kind of farm, in order: [{key, key_check, category,
+    day, ...}, ...]. Upland and rainfed farms sow directly and follow their own booklets."""
+    if ecosystem in direct_seeded.BOOKS:
+        steps = direct_seeded.plan(maturity_days, ecosystem)
+        if ecosystem == direct_seeded.RAINFED:      # drying and storing are the same as irrigated
+            steps.append({'key': 'drystore', 'key_check': 9, 'category': 'harvesting',
+                          'day': int(maturity_days) + 1})
+        return steps
     maturity = int(maturity_days)
     days = _days(maturity)
     steps = [
@@ -82,6 +91,23 @@ def text(key: str, language: str) -> dict:
 
 def reference(pages: str) -> str:
     return f'PalayCheck 2022, p. {pages}' if '-' not in pages and ',' not in pages else f'PalayCheck 2022, pp. {pages}'
+
+
+def reference_for(key: str) -> str:
+    """Where a step comes from, for the farmer: book and page."""
+    if key in direct_seeded.REFERENCES:
+        return direct_seeded.REFERENCES[key][0]
+    return reference(PAGES[key])
+
+
+def reference_url_for(key: str) -> str:
+    if key in direct_seeded.REFERENCES:
+        return direct_seeded.REFERENCES[key][1]
+    return REFERENCE_URL
+
+
+def book_title(ecosystem) -> str:
+    return direct_seeded.BOOKS.get(ecosystem, REFERENCE)
 
 
 # (title, instruction, explanation) per language
@@ -393,3 +419,5 @@ TEXT = {
                 'taas ang baligya.'),
     },
 }
+
+TEXT.update(direct_seeded.TEXT)

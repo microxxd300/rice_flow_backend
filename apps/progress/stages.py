@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.guides.direct_seeded import STEP_STAGE as DIRECT_SEEDED_STAGE
 from apps.guides.models import PlantingGuide
 from apps.varieties.models import GrowthStage
 
@@ -24,6 +25,7 @@ STEP_STAGE = {
     'drain': 8,                                      # Ripening / Maturity
     'harvest': 9,                                    # Harvesting
     'drystore': 10,                                  # Post-Harvest
+    **DIRECT_SEEDED_STAGE,                           # upland and rainfed guides
 }
 
 
