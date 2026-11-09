@@ -4,19 +4,27 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from django.utils import timezone
 from apps.accounts.permissions import IsSuperUser
 from apps.activity.record import log_change
 from apps.environmental.models import EnvironmentalScan
+from apps.environmental.serializers import EnvironmentalScanSerializer
+from apps.environmental.services.openmeteo import current_season
+from apps.farms.models import Farm
 from apps.varieties.models import RiceVariety, GrowthStage
 from apps.progress.models import FarmCycle
 from .models import ClusterModel, Recommendation, RecommendationResult, SuitabilityRuleSet
-from .scoring import calculate_rsi, default_rules_payload
+from .scoring import calculate_rsi, default_rules_payload, planting_season
 from .clustering import predict_cluster, preselect_varieties
 from .training import train_and_record
 from .fit_explanation import build_fit_explanation
 from .serializers import (
     RecommendationSerializer, ClusterModelSerializer, SuitabilityRuleSetSerializer
 )
+
+
+# A season is at most six months: a same-named season further back is last year's
+MAX_REUSE_DAYS = 184
 
 
 def ensure_active_cycle_for_recommendation(recommendation):
@@ -105,6 +113,42 @@ class SuitabilityRulesView(APIView):
         out = SuitabilityRuleSetSerializer(rs).data
         out['source'] = 'database'
         return Response(out, status=status.HTTP_200_OK)
+
+
+def _still_fits(recommendation) -> bool:
+    """A farm's top 3 can start its next crop only in the season they were scored for
+    (it ranks varieties by season) and if the farm has not been changed since."""
+    scan = recommendation.scan
+    today = timezone.localdate()
+    return (recommendation.results.exists()
+            and (today - timezone.localdate(scan.scanned_at)).days <= MAX_REUSE_DAYS
+            and planting_season(scan) == current_season(today)
+            and recommendation.farm.updated_at <= scan.scanned_at)
+
+
+class ReuseRecommendationView(APIView):
+    """Start a farm's next crop from its latest top 3, with no new scan.
+
+    POST /api/recommendations/reuse/{farm_id}/ returns {"recommendation": ..., "scan": ...}
+    and starts the crop cycle, or 409 when a new scan is needed (the season changed).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, farm_id):
+        try:
+            farm = Farm.objects.get(id=farm_id, user=request.user)
+        except Farm.DoesNotExist:
+            return Response({'detail': 'Farm not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        latest = farm.recommendations.select_related('scan', 'farm').order_by('-created_at', '-id').first()
+        if not latest or not _still_fits(latest):
+            return Response({'detail': 'A new scan is needed for this season.'}, status=status.HTTP_409_CONFLICT)
+
+        ensure_active_cycle_for_recommendation(latest)
+        return Response({
+            'recommendation': RecommendationSerializer(latest).data,
+            'scan':           EnvironmentalScanSerializer(latest.scan).data,
+        })
 
 
 class GenerateRecommendationView(APIView):

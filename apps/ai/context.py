@@ -104,7 +104,8 @@ def farmer_context(user, farm_id=None) -> str:
         issue = log.get_issue_type_display() if log.issue_type else 'Observation'
         severity = f' ({log.severity})' if log.severity else ''
         action = f'; action taken: {_short(log.action_taken)}' if log.action_taken else ''
-        lines.append(f'Field log {log.log_date:%B %d}: {issue}{severity} - {_short(log.observation)}{action}.')
+        fixed = '; the farmer marked this fixed' if log.resolved_at else ''
+        lines.append(f'Field log {log.log_date:%B %d}: {issue}{severity} - {_short(log.observation)}{action}{fixed}.')
 
     try:
         weather = get_current_weather(float(farm.latitude), float(farm.longitude))

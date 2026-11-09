@@ -12,6 +12,11 @@ class FarmSerializer(serializers.ModelSerializer):
         # The barangay follows the pin (barangays.py); the app cannot set it
         read_only_fields = ['user', 'barangay', 'location_flag', 'created_at', 'updated_at']
 
+    def validate_area_hectares(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Farm size must be more than 0.')
+        return value
+
     # Outside Panabo City is refused. Inside, warn, never block: the app asks the farmer
     # before saving; here we only record the result so admins can review pins kept
     # despite a warning.

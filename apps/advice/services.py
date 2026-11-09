@@ -18,6 +18,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.guides.palaycheck import palaycheck_page_url
 from .knowledge import GET_HELP, LANGS, PROBLEMS, SECTIONS, SOURCES, URGENT
 
 ANSWER_REUSE_SECONDS = 6 * 60 * 60
@@ -43,7 +44,8 @@ DOSE = re.compile(r'\b\d+(?:[.,]\d+)?\s*(?:ml|l|liters?|litres?|litro|kg|kilos?|
 def _source(src):
     key, where = src
     info = SOURCES[key]
-    return {'title': info['title'], 'publisher': info['publisher'], 'pages': where, 'url': info['url']}
+    url = palaycheck_page_url(where) if key == 'palaycheck' and where else info['url']
+    return {'title': info['title'], 'publisher': info['publisher'], 'pages': where, 'url': url}
 
 
 def line(item, lang):

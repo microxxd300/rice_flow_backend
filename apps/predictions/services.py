@@ -347,6 +347,8 @@ def _get_real_training_data():
         # The land actually harvested, not the whole farm (the DA's yield per area harvested)
         area = float(yr.area_harvested_ha or farm.area_hectares or 1.0)
         y_t_ha = (dry_yield_kg(yr) / 1000) / max(area, 0.1)
+        if not APP_YIELD_RANGE[0] <= y_t_ha <= APP_YIELD_RANGE[1]:   # a typo, not a yield
+            continue
         X_rows.append([
             area,
             float(scan.soil_ph),

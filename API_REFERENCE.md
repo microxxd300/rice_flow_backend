@@ -783,6 +783,14 @@ Authorization: Bearer <TOKEN>
 ngrok-skip-browser-warning: true
 ```
 
+### Start the next crop from the latest top 3 (no new scan)
+```
+POST https://doing-haven-requisite.ngrok-free.dev/api/recommendations/reuse/{farm_id}/
+Authorization: Bearer <TOKEN>
+ngrok-skip-browser-warning: true
+```
+Returns `200` with `{"recommendation": {...}, "scan": {...}}` and starts the crop cycle. Returns `409` when a new scan is needed: the season has changed since the last scan, the scan is over 184 days old, or the farm was edited after it. Returns `404` for a farm that is not yours.
+
 ### Train K-means clustering models (admin only)
 ```
 POST https://doing-haven-requisite.ngrok-free.dev/api/recommendations/train/

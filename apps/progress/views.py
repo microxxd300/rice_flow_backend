@@ -134,7 +134,7 @@ class ProgressLogListCreateView(ListCreateAPIView):
         cycle_id = self.request.query_params.get('cycle_id')
         if cycle_id:
             qs = qs.filter(farm_cycle_id=cycle_id)
-        return qs
+        return qs.order_by('-log_date', '-id')   # newest first, also within one day
 
 
 class ProgressLogDetailView(RetrieveUpdateDestroyAPIView):
