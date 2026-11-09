@@ -12,10 +12,12 @@ The English summaries keep PalayCheck's numbers. The Filipino and Bisaya text, a
 validator before the defense.
 """
 
+import re
 from . import direct_seeded
 
 REFERENCE = 'PalayCheck System 2022 Revised Edition (DA-PhilRice)'
 REFERENCE_URL = 'https://www.philrice.gov.ph/wp-content/uploads/2023/02/PalayCheck-System-2022-Revised-Edition.pdf'
+BOOKLET_VIEWER_URL = 'https://riceflow.me/booklet.html'
 
 SEEDLING_AGE_DAYS = 21          # transplanted at 18-21 days (p. 27); the cycle counts from sowing
 PI_BEFORE_HARVEST = 60          # panicle initiation about 60 days before harvest
@@ -100,10 +102,16 @@ def reference_for(key: str) -> str:
     return reference(PAGES[key])
 
 
+def palaycheck_page_url(pages: str) -> str:
+    """The booklet opened at the cited pages (riceflow.me shows one page at a time)."""
+    cited = re.sub(r'[^0-9,-]', '', pages or '')
+    return f'{BOOKLET_VIEWER_URL}?b=palaycheck&pages={cited}' if cited else REFERENCE_URL
+
+
 def reference_url_for(key: str) -> str:
     if key in direct_seeded.REFERENCES:
         return direct_seeded.REFERENCES[key][1]
-    return REFERENCE_URL
+    return palaycheck_page_url(PAGES[key])
 
 
 def book_title(ecosystem) -> str:
@@ -232,21 +240,14 @@ TEXT = {
     },
     'fertilizer1': {
         'en': ('First fertilizer application',
-               'Apply the first fertilizer between 0 and 14 days after transplanting. Base the amounts of N, P '
-               'and K on your field\'s soil test or on a recommendation from the LCC App, RCMAS, NOPT or MOET.',
-               'Young plants need nutrients early to make many tillers. A soil test shows what your field '
-               'really lacks, so you do not pay for fertilizer it does not need.'),
+               'Apply the first fertilizer between 0 and 14 days after transplanting. Base the amounts of N, P and K on a recommendation from the LCC App, RCMAS, NOPT or MOET.',
+               'Young plants need nutrients early to make many tillers. These tools show what your field really needs, so you do not pay for fertilizer it does not need.'),
         'fil': ('Unang abono',
-                'Mag-abono sa loob ng 0-14 araw pagkatapos maglipat-tanim. Ibase ang dami ng N, P at K sa soil '
-                'test ng bukid mo, o sa payo ng LCC App, RCMAS, NOPT o MOET.',
-                'Kailangan ng batang palay ang sustansya nang maaga para dumami ang suwi. Makikita sa soil test'
-                ' kung ano talaga ang kulang sa bukid mo, kaya hindi ka gagastos sa abonong hindi kailangan.'),
+                'Mag-abono sa loob ng 0-14 araw pagkatapos maglipat-tanim. Ibase ang dami ng N, P at K sa payo ng LCC App, RCMAS, NOPT o MOET.',
+                'Kailangan ng batang palay ang sustansya nang maaga para dumami ang suwi. Ipinapakita ng mga ito kung ano talaga ang kailangan ng bukid mo, kaya hindi ka gagastos sa abonong hindi kailangan.'),
         'ceb': ('Unang abono',
-                'Pag-abono sulod sa 0-14 ka adlaw human sa pagbalhin-tanom. Ibase ang gidaghanon sa N, P ug K '
-                'sa soil test sa imong uma, o sa tambag sa LCC App, RCMAS, NOPT o MOET.',
-                'Kinahanglan sa batan-ong humay ang sustansya sa sayo aron modaghan ang saha. Makita sa soil '
-                'test kung unsa gyud ang kulang sa imong uma, mao nga dili ka mogasto sa abono nga dili '
-                'kinahanglan.'),
+                'Pag-abono sulod sa 0-14 ka adlaw human sa pagbalhin-tanom. Ibase ang gidaghanon sa N, P ug K sa tambag sa LCC App, RCMAS, NOPT o MOET.',
+                'Kinahanglan sa batan-ong humay ang sustansya sa sayo aron modaghan ang saha. Ipakita niini kung unsa gyud ang kinahanglan sa imong uma, busa dili ka mogasto sa abono nga dili kinahanglan.'),
     },
     'lcc': {
         'en': ('Check the leaf color every 7 days',
@@ -268,24 +269,14 @@ TEXT = {
     },
     'water': {
         'en': ('Manage the water',
-               'Keep the field saturated up to 15 days after transplanting. From early tillering, keep 3-5 cm '
-               'of water at each irrigation, practicing Alternate Wetting and Drying (AWD) with an observation '
-               'well.',
-               'Too much water and too little water both stress the rice and cut the yield. AWD lets the field '
-               'dry a little between irrigations, which saves water without hurting the crop.'),
+               'Keep the field saturated up to 15 days after transplanting. From early tillering, keep 3-5 cm of water at each irrigation. If water is scarce, practice Alternate Wetting and Drying (AWD) with an observation well.',
+               'Too much water and too little water both stress the rice and cut the yield. When water is scarce, AWD is the controlled way to irrigate.'),
         'fil': ('Bantayan ang tubig',
-                'Panatilihing basang-basa ang bukid hanggang 15 araw pagkatapos maglipat-tanim. Pagsimula ng '
-                'pagsuwi, 3-5 cm na tubig kada patubig, at gamitin ang AWD (Alternate Wetting and Drying) na '
-                'may observation well.',
-                'Masama sa palay ang sobra at kulang na tubig, at bumababa ang ani. Sa AWD, hinahayaang matuyo '
-                'nang kaunti ang bukid bago patubigan ulit, kaya tipid sa tubig pero hindi nasisira ang tanim.'),
+                'Panatilihing basang-basa ang bukid hanggang 15 araw pagkatapos maglipat-tanim. Pagsimula ng pagsuwi, 3-5 cm na tubig kada patubig. Kung kulang ang tubig, gamitin ang AWD (Alternate Wetting and Drying) na may observation well.',
+                'Masama sa palay ang sobra at kulang na tubig, at bumababa ang ani. Kapag kulang ang tubig, AWD ang maayos na paraan ng pagpapatubig.'),
         'ceb': ('Bantayi ang tubig',
-                'Hupti nga basa kaayo ang uma hangtod 15 ka adlaw human sa pagbalhin-tanom. Pagsugod sa '
-                'pagsaha, 3-5 cm nga tubig kada patubig, ug gamita ang AWD (Alternate Wetting and Drying) nga '
-                'naay observation well.',
-                'Dili maayo sa humay ang sobra ug kulang nga tubig, ug mokunhod ang ani. Sa AWD, pasagdan nga '
-                'mamala og gamay ang uma sa dili pa patubigan usab, mao nga makadaginot sa tubig pero dili '
-                'madaot ang tanom.'),
+                'Hupti nga basa kaayo ang uma hangtod 15 ka adlaw human sa pagbalhin-tanom. Pagsugod sa pagsaha, 3-5 cm nga tubig matag patubig. Kung kulang ang tubig, gamita ang AWD (Alternate Wetting and Drying) nga naay observation well.',
+                'Dili maayo sa humay ang sobra ug kulang nga tubig, ug mous-os ang ani. Kung kulang ang tubig, AWD ang maayong paagi sa pagpatubig.'),
     },
     'weeds': {
         'en': ('Control weeds and snails',
@@ -309,18 +300,18 @@ TEXT = {
     },
     'pests': {
         'en': ('Check for pests and diseases',
-               'Walk the field every week. Act only when damage goes past the levels listed in PalayCheck '
+               'Monitor the field regularly from the early stage of the crop. Act only when damage goes past the levels listed in PalayCheck '
                '(pp. 48-49). Do not spray against leaf-eating insects within 30 days after transplanting.',
                'Spraying too early or too often also kills the friendly insects that eat pests. Checking first '
                'means you spray only when it is worth it.'),
         'fil': ('Silipin kung may peste o sakit',
-                'Ikutin ang bukid linggo-linggo. Kumilos lang kapag lumampas na ang sira sa nakalista sa '
+                'Regular na ikutin ang bukid mula sa simula ng tanim. Kumilos lang kapag lumampas na ang sira sa nakalista sa '
                 'PalayCheck (pp. 48-49). Huwag mag-spray laban sa mga insektong kumakain ng dahon sa unang 30 '
                 'araw pagkatapos maglipat-tanim.',
                 'Pag masyadong maaga o madalas mag-spray, namamatay din ang mga kaibigang insekto na kumakain '
                 'ng peste. Kaya tingnan muna, at mag-spray lang kung sulit.'),
         'ceb': ('Tan-awa kung naay peste o sakit',
-                'Libota ang uma kada semana. Lihok lang kung lapas na ang daot sa nakalista sa PalayCheck (pp. '
+                'Regular nga libota ang uma gikan sa sinugdan sa tanom. Lihok lang kung lapas na ang daot sa nakalista sa PalayCheck (pp. '
                 '48-49). Ayaw pag-spray sa mga insekto nga mokaon og dahon sulod sa unang 30 ka adlaw human sa '
                 'pagbalhin-tanom.',
                 'Kung sayo kaayo o kanunay mag-spray, mamatay pud ang mga insekto nga mokaon sa peste. Mao nga '

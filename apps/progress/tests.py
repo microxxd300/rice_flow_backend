@@ -146,6 +146,15 @@ class LogSeverityTests(TestCase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(ProgressLog.objects.get(pk=r.json()['id']).severity, 'medium')
 
+    def test_logs_of_one_day_list_newest_first(self):
+        user = User.objects.create_user(username='sameday', password='pass12345')
+        cycle = make_cycle(make_farm(user))
+        ids = [ProgressLog.objects.create(farm_cycle=cycle, log_date='2026-06-02', observation=str(i)).id for i in range(3)]
+        client = APIClient()
+        client.force_authenticate(user)
+        r = client.get('/api/progress/logs/', {'cycle_id': cycle.id})
+        self.assertEqual([row['id'] for row in r.json()['results']], ids[::-1])
+
 
 class StageTodayTests(TestCase):
     """A crop's stage follows its age; the stage saved when the cycle started never moved on."""

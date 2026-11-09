@@ -47,6 +47,7 @@ def sources_from(grounding: dict) -> list[dict]:
     source objects the problem cards use: {title, publisher, pages, url}. Parts the
     answer's sentences point to come first; unknown documents are left out."""
     from apps.advice.knowledge import SOURCES
+    from apps.guides.palaycheck import palaycheck_page_url
 
     chunks = grounding.get('groundingChunks') or []
     used = []
@@ -66,8 +67,9 @@ def sources_from(grounding: dict) -> list[dict]:
         if key not in BOOKLETS or key not in SOURCES:
             continue
         info = SOURCES[key]
-        source = {'title': info['title'], 'publisher': info['publisher'],
-                  'pages': _where(key, ctx.get('pageNumber')), 'url': info['url']}
+        where = _where(key, ctx.get('pageNumber'))
+        url = palaycheck_page_url(where) if key == 'palaycheck' and where else info['url']
+        source = {'title': info['title'], 'publisher': info['publisher'], 'pages': where, 'url': url}
         if source not in out:
             out.append(source)
         if len(out) == MAX_SOURCES:

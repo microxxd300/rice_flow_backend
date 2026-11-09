@@ -146,7 +146,7 @@ class PalayCheckGuideTests(TestCase):
         self.assertEqual(first['key'], 'seeds')
         self.assertEqual(first['keyCheck'], 1)
         self.assertEqual(first['reference'], 'PalayCheck 2022, pp. 14-15')
-        self.assertTrue(first['referenceUrl'].endswith('PalayCheck-System-2022-Revised-Edition.pdf'))
+        self.assertEqual(first['referenceUrl'], 'https://riceflow.me/booklet.html?b=palaycheck&pages=14-15')
         self.assertTrue(first['explanation'])
         self.assertEqual(self.generate()['source'], 'SAVED')                       # built once
 
@@ -161,6 +161,20 @@ class PalayCheckGuideTests(TestCase):
     def test_the_next_crop_of_the_variety_gets_a_new_guide(self):
         first = self.generate()
         GuideStep.objects.filter(guide_id=first['id']).update(is_completed=True)   # crop finished
+        second = self.generate()
+        self.assertNotEqual(second['id'], first['id'])
+        self.assertFalse(any(s['is_completed'] for s in second['steps']))
+        self.assertEqual(self.generate()['id'], second['id'])                       # then kept
+
+    def test_a_crop_harvested_with_steps_unlogged_does_not_pass_its_guide_on(self):
+        first = self.generate()
+        guide = PlantingGuide.objects.get(pk=first['id'])
+        GuideStep.objects.filter(pk=first['steps'][0]['id']).update(is_completed=True)
+        made = timezone.now() - timedelta(days=20)
+        PlantingGuide.objects.filter(pk=guide.pk).update(created_at=made)
+        FarmCycle.objects.create(farm=guide.farm, variety=guide.variety, season='wet', year=2026,
+                                 planting_date=made.date(), status='completed',
+                                 actual_harvest_date=timezone.localdate())
         second = self.generate()
         self.assertNotEqual(second['id'], first['id'])
         self.assertFalse(any(s['is_completed'] for s in second['steps']))

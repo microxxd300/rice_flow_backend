@@ -139,7 +139,7 @@ class WeatherForecastView(APIView):
 def weather_outlook(hourly: dict, start: int) -> dict:
     """Rain and wind ahead of the current hour, for the planting guide's weather advice:
     total rain (mm) and highest rain chance (%) in the next 6, 24 and 48 hours, and the
-    strongest wind (km/h) in the next 12."""
+    strongest wind (km/h) in the next 12, and the highest temperature (°C) in the next 24."""
     def window(name, hours):
         return [v for v in hourly.get(name, [])[start:start + hours] if v is not None]
 
@@ -148,6 +148,7 @@ def weather_outlook(hourly: dict, start: int) -> dict:
         out[f'rain_mm_{hours}h'] = round(sum(window('precipitation', hours)), 1)
         out[f'rain_prob_{hours}h'] = max(window('precipitation_probability', hours), default=0)
     out['wind_kph_max_12h'] = round(max(window('wind_speed_10m', 12), default=0))
+    out['temp_c_max_24h'] = round(max(window('temperature_2m', 24), default=0))
     return out
 
 WEATHER_FALLBACK = {
