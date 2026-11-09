@@ -1,11 +1,9 @@
-"""The growth stage a crop is in today.
+"""The growth stage a crop is in today: one rule for the app, the admin and the AI.
 
-FarmCycle.current_stage is set once, when the cycle starts, and nothing moves it on,
-so a crop sown in June still read "Germination & Seedling" in October. The stage is
-worked out from the crop's age instead: day 0 = sowing (planting_date), the same
-timeline the planting guide uses, against each GrowthStage's day range. The PalayCheck
-steps the farmer has logged move it on too: whichever is further along counts, so a
-farmer who logs sees the real stage at once and one who forgets still sees time pass.
+The planting guide decides. The stage is the furthest step the farmer has logged, and the
+crop's age only moves it through stages that have no guide step (Booting, Grain Filling),
+never past the next step still to log. A crop not sown yet has no stage, and a harvested
+crop is at the last one. With no guide, the stage comes from the age alone.
 """
 from datetime import timedelta
 
@@ -29,17 +27,12 @@ STEP_STAGE = {
 }
 
 
-def guide_stage_no(cycle) -> int:
-    """The furthest stage the farmer's logged guide steps reach (0 for none). Only a guide
-    for this crop counts (sown within a month of it), never the last crop's finished one."""
+def _crop_guide(cycle):
+    """The guide for this crop (sown within a month of it), never the last crop's finished one."""
     window = (cycle.planting_date - timedelta(days=30), cycle.planting_date + timedelta(days=30))
     guides = PlantingGuide.objects.filter(farm_id=cycle.farm_id, start_date__range=window) \
         .order_by('-created_at')
-    guide = (cycle.variety_id and guides.filter(variety_id=cycle.variety_id).first()) or guides.first()
-    if not guide:
-        return 0
-    keys = guide.steps.filter(is_completed=True).values_list('template_key', flat=True)
-    return max((STEP_STAGE.get(k, 0) for k in keys), default=0)
+    return (cycle.variety_id and guides.filter(variety_id=cycle.variety_id).first()) or guides.first()
 
 
 def growth_stages() -> list:
@@ -47,21 +40,48 @@ def growth_stages() -> list:
     return list(GrowthStage.objects.order_by('stage_no'))
 
 
-def stage_today(cycle, stages=None, today=None):
-    """The cycle's stage: by its age, or by the guide steps logged if those are further
-    along. Only an active cycle moves on; a completed or abandoned one keeps the stage
-    it was saved with."""
-    if cycle.status != 'active' or not cycle.planting_date:
-        return cycle.current_stage
+def _stage_at(stages, stage_no):
+    """The stage with this number, or the nearest one before it."""
+    reached = [s for s in stages if s.stage_no <= stage_no]
+    return reached[-1] if reached else None
+
+
+def age_stage(cycle, stages=None, today=None):
+    """The stage by days since sowing alone: None before the sowing day. The app uses it to
+    ask about the harvest even when the farmer stopped logging."""
+    if not cycle.planting_date:
+        return None
+    day = ((today or timezone.localdate()) - cycle.planting_date).days
+    if day < 0:
+        return None
     stages = growth_stages() if stages is None else stages
-    day = max(0, ((today or timezone.localdate()) - cycle.planting_date).days)
     start = 'days_min_upland' if cycle.farm.ecosystem == 'upland' else 'days_min_paddy'
-    # The last stage that has started by this day (stage start days only go up)
     current = None
-    for stage in stages:
+    for stage in stages:     # the last stage that has started by this day (start days only go up)
         if getattr(stage, start) <= day:
             current = stage
-    logged = guide_stage_no(cycle)
-    if logged and (not current or logged > current.stage_no):
-        current = next((s for s in stages if s.stage_no == logged), current)
-    return current or cycle.current_stage
+    return current
+
+
+def stage_today(cycle, stages=None, today=None):
+    """The cycle's stage today (see the top of this file). None for a crop not sown yet."""
+    stages = growth_stages() if stages is None else stages
+    if cycle.status == 'completed':
+        return stages[-1] if stages else cycle.current_stage
+    if cycle.status != 'active' or not cycle.planting_date:
+        return cycle.current_stage
+    by_age = age_stage(cycle, stages, today)
+    if by_age is None:
+        return None
+    guide = _crop_guide(cycle)
+    rows = [(STEP_STAGE.get(key, 0), done) for key, done in
+            guide.steps.values_list('template_key', 'is_completed')] if guide else []
+    if not any(no for no, _ in rows):          # no guide, or one from before the PalayCheck steps
+        return by_age
+    logged = max((no for no, done in rows if done), default=0)
+    if logged == 0 and any(no == 1 for no, _ in rows):   # the sowing step is still open
+        return None
+    reached = max(1, logged)
+    ahead = [no for no, done in rows if not done and no > reached]
+    limit = min(ahead) - 1 if ahead else by_age.stage_no
+    return _stage_at(stages, max(reached, min(by_age.stage_no, limit)))

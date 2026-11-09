@@ -4,6 +4,7 @@ import concurrent.futures
 from collections import Counter
 import requests
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.db.models import Count
@@ -483,7 +484,7 @@ class SystemHealthView(APIView):
 
     def _probe_gemini(self):
         """Don't call Gemini (costs quota) — just check the key exists."""
-        key = os.getenv('GEMINI_API_KEY', '').strip()
+        key = settings.GEMINI_API_KEY
         return {
             'key':   'gemini',
             'label': 'Google Gemini API',

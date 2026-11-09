@@ -29,7 +29,7 @@ class Command(BaseCommand):
         parser.add_argument('--replace', action='store_true', help='Upload again booklets already in the store')
 
     def handle(self, *args, **opts):
-        key = os.getenv('GEMINI_API_KEY', '')
+        key = settings.GEMINI_API_KEY
         if not key:
             raise CommandError('GEMINI_API_KEY is not set.')
         try:

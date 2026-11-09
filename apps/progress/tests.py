@@ -191,9 +191,50 @@ class StageTodayTests(TestCase):
         from .stages import stage_today
         self.assertEqual(stage_today(self.cycle(57, ecosystem='upland')).name, 'Booting')
 
-    def test_a_finished_cycle_keeps_its_saved_stage(self):
+    def test_a_harvested_crop_is_at_the_last_stage(self):
         from .stages import stage_today
-        self.assertEqual(stage_today(self.cycle(90, status='completed')), self.first)
+        self.assertEqual(stage_today(self.cycle(90, status='completed')).name, 'Post-Harvest')
+
+    def test_a_crop_not_sown_yet_has_no_stage(self):
+        from .stages import stage_today
+        self.assertIsNone(stage_today(self.cycle(-5)))
+
+    def guide(self, cycle, done):
+        from apps.guides.models import GuideStep, PlantingGuide
+        from apps.varieties.models import RiceVariety
+        variety = RiceVariety.objects.create(variety_id='T14', nsic_code='NSIC T14', common_name='Tubigan 14',
+                                             ecosystem='rainfed_lowland', season='both', maturity_days=110,
+                                             avg_yield_t_ha=5.0, max_yield_t_ha=8.0)
+        guide = PlantingGuide.objects.create(farm=cycle.farm, variety=variety, season='Wet Season 2026',
+                                             start_date=cycle.planting_date)
+        for no, key in enumerate(['seeds', 'seedbed', 'transplant', 'fertilizer1', 'flowering', 'drain'], start=1):
+            GuideStep.objects.create(guide=guide, step_no=no, template_key=key, title=key, description='-',
+                                     is_completed=key in done)
+
+    def test_sowing_not_answered_means_no_stage_yet(self):
+        from .stages import age_stage, stage_today
+        cycle = self.cycle(65)
+        self.guide(cycle, ['seeds'])
+        self.assertIsNone(stage_today(cycle))
+        self.assertEqual(age_stage(cycle).name, 'Booting')   # the app still asks about the harvest
+
+    def test_the_guide_decides_the_stage_not_the_age_alone(self):
+        from .stages import stage_today
+        cycle = self.cycle(65)
+        self.guide(cycle, ['seeds', 'seedbed'])
+        self.assertEqual(stage_today(cycle).name, 'Germination & Seedling')
+
+    def test_the_age_moves_through_stages_with_no_guide_step(self):
+        from .stages import stage_today
+        cycle = self.cycle(65)
+        self.guide(cycle, ['seeds', 'seedbed', 'transplant', 'fertilizer1'])
+        self.assertEqual(stage_today(cycle).name, 'Booting')
+
+    def test_a_logged_step_moves_the_stage_ahead_of_the_age(self):
+        from .stages import stage_today
+        cycle = self.cycle(1)
+        self.guide(cycle, ['seeds', 'seedbed', 'transplant', 'fertilizer1'])
+        self.assertEqual(stage_today(cycle).name, 'Tillering')
 
     def test_the_admin_cycle_list_shows_the_stage_for_today(self):
         self.cycle(65)
