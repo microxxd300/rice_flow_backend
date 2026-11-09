@@ -125,6 +125,9 @@ class ProgressLogSerializer(serializers.ModelSerializer):
         return data
 
 
+MAX_YIELD_T_HA = 20
+
+
 class YieldRecordSerializer(serializers.ModelSerializer):
     # Keeps the one-to-one check that the auto-generated field had
     farm_cycle = OwnFarmCycleField(validators=[UniqueValidator(queryset=YieldRecord.objects.all())])
@@ -133,3 +136,16 @@ class YieldRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = YieldRecord
         fields = '__all__'
+
+    def validate(self, attrs):
+        cycle = attrs.get('farm_cycle') or getattr(self.instance, 'farm_cycle', None)
+        harvest = attrs.get('harvest_date') or getattr(self.instance, 'harvest_date', None)
+        if cycle and harvest and harvest <= cycle.planting_date:
+            raise serializers.ValidationError({'harvest_date': 'The harvest must be after the sowing day.'})
+        # Every harvest trains the yield model, so a mistyped one must not get in
+        net = attrs.get('net_yield_kg', getattr(self.instance, 'net_yield_kg', None))
+        area = attrs.get('area_harvested_ha', getattr(self.instance, 'area_harvested_ha', None))
+        if net and area and net / area / 1000 > MAX_YIELD_T_HA:
+            raise serializers.ValidationError({'net_yield_kg': 'This yield is too high to be real. '
+                                                               'Check the number of sacks and the area.'})
+        return attrs
