@@ -100,6 +100,17 @@ class BookletChatTests(TestCase):
         self.assertFalse(calls[-1][0])
         self.assertIn(calls[-1][1], views.GEMINI_MODELS)
 
+    def test_when_the_booklet_search_times_out_the_plain_chat_still_answers(self, _weather):
+        def post(url, **kwargs):
+            if 'tools' in kwargs['json']:
+                raise views.requests.exceptions.Timeout()
+            return gemini_reply('Use urea.')
+
+        with patch.object(views.requests, 'post', side_effect=post):
+            res = self.chat('Fertilizer?')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['reply'], 'Use urea.')
+
     def test_a_reply_naming_a_pesticide_is_replaced(self, _weather):
         reply = grounded_reply('Spray cypermethrin today.', [chunk('palaycheck', 52)])
         with patch.object(views.requests, 'post', return_value=reply):
