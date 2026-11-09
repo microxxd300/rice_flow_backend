@@ -120,9 +120,8 @@ def _crop_is_over(guide) -> bool:
     steps = guide.steps.all()
     if steps.exists() and not steps.filter(is_completed=False).exists():
         return True
-    # Harvested with steps left unlogged: a harvest after the guide was made ended its crop
-    if guide.farm.farm_cycles.filter(status='completed',
-                                     actual_harvest_date__gt=timezone.localdate(guide.created_at)).exists():
+    # Harvested with steps left unlogged: a harvest saved after the guide was made ended its crop
+    if guide.farm.farm_cycles.filter(status='completed', yield_record__recorded_at__gt=guide.created_at).exists():
         return True
     harvest = guide.start_date + timedelta(days=int(guide.variety.maturity_days or 120))
     return timezone.now().date() > harvest + timedelta(days=30)

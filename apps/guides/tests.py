@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.environmental.models import EnvironmentalScan
 from apps.farms.models import Farm
-from apps.progress.models import FarmCycle, ProgressLog
+from apps.progress.models import FarmCycle, ProgressLog, YieldRecord
 from apps.recommendations.models import Recommendation
 from apps.varieties.models import RiceVariety
 
@@ -172,9 +172,11 @@ class PalayCheckGuideTests(TestCase):
         GuideStep.objects.filter(pk=first['steps'][0]['id']).update(is_completed=True)
         made = timezone.now() - timedelta(days=20)
         PlantingGuide.objects.filter(pk=guide.pk).update(created_at=made)
-        FarmCycle.objects.create(farm=guide.farm, variety=guide.variety, season='wet', year=2026,
-                                 planting_date=made.date(), status='completed',
-                                 actual_harvest_date=timezone.localdate())
+        cycle = FarmCycle.objects.create(farm=guide.farm, variety=guide.variety, season='wet', year=2026,
+                                         planting_date=made.date(), status='completed',
+                                         actual_harvest_date=timezone.localdate())
+        YieldRecord.objects.create(farm_cycle=cycle, harvest_date=timezone.localdate(), area_harvested_ha=1,
+                                   gross_yield_kg=4000, net_yield_kg=4000)
         second = self.generate()
         self.assertNotEqual(second['id'], first['id'])
         self.assertFalse(any(s['is_completed'] for s in second['steps']))

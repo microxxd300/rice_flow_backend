@@ -17,7 +17,7 @@ from . import direct_seeded
 
 REFERENCE = 'PalayCheck System 2022 Revised Edition (DA-PhilRice)'
 REFERENCE_URL = 'https://www.philrice.gov.ph/wp-content/uploads/2023/02/PalayCheck-System-2022-Revised-Edition.pdf'
-BOOKLET_VIEWER_URL = 'https://riceflow.me/booklet.html'
+BOOKLET_VIEWER_URL = direct_seeded.BOOKLET_VIEWER_URL
 
 SEEDLING_AGE_DAYS = 21          # transplanted at 18-21 days (p. 27); the cycle counts from sowing
 PI_BEFORE_HARVEST = 60          # panicle initiation about 60 days before harvest
