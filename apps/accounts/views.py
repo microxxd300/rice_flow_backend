@@ -6,6 +6,8 @@ import requests
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.db import connection
 from django.db.models import Count
 from rest_framework import status
@@ -113,6 +115,9 @@ def _clean_full_name(user):
     return full or user.username
 
 
+CANNOT_LOCK_SELF = 'You cannot deactivate your own account.'
+
+
 class AdminUserListView(APIView):
     """GET /api/auth/users/ — admin-only list of all users."""
     permission_classes = [IsSuperUser]
@@ -155,6 +160,8 @@ class AdminUserListView(APIView):
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if user.pk == request.user.pk and not request.data.get('is_active', True):
+            return Response({'error': CANNOT_LOCK_SELF}, status=status.HTTP_400_BAD_REQUEST)
         was_active = user.is_active
         if 'is_active' in request.data:
             user.is_active = bool(request.data['is_active'])
@@ -205,10 +212,7 @@ class AdminUserDetailView(APIView):
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
         # Safety: don't let an admin lock themselves out.
         if user.pk == request.user.pk:
-            return Response(
-                {'error': 'You cannot deactivate your own account.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({'error': CANNOT_LOCK_SELF}, status=status.HTTP_400_BAD_REQUEST)
         was_active = user.is_active
         user.is_active = False
         user.save(update_fields=['is_active'])
@@ -298,10 +302,14 @@ def _create_or_update_user(request, instance=None):
     creating = instance is None
     errors = {}
 
-    # Required fields on create.
+    # Required fields on create; an edit can't empty the ones used to sign in.
     if creating:
         for f in ('username', 'email', 'password'):
             if not (data.get(f) or '').strip():
+                errors[f] = f'{f} is required.'
+    else:
+        for f in ('username', 'email'):
+            if f in data and not (data[f] or '').strip():
                 errors[f] = f'{f} is required.'
 
     # Uniqueness on username / email if provided.
@@ -320,11 +328,23 @@ def _create_or_update_user(request, instance=None):
             qs = qs.exclude(pk=instance.pk)
         if qs.exists():
             errors['email'] = 'Email already registered.'
+        try:
+            validate_email(new_email)
+        except DjangoValidationError:
+            errors['email'] = 'Enter a valid email address.'
 
     # Role validation.
     role = (data.get('role') or '').strip().lower()
     if role and role not in _ROLES:
         errors['role'] = f"role must be one of: {', '.join(_ROLES)}."
+
+    # Safety: an admin can't turn off or demote their own account (the last admin
+    # would have no way back in).
+    if instance is not None and instance.pk == request.user.pk:
+        if 'is_active' in data and not data['is_active']:
+            errors['is_active'] = CANNOT_LOCK_SELF
+        if role and role != 'superadmin':
+            errors['role'] = 'You cannot remove your own admin role.'
 
     if errors:
         return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -546,6 +566,7 @@ class AdminStatsView(APIView):
         from django.db.models import Sum
         from apps.farms.models import Farm
         from apps.progress.models import YieldRecord, FarmCycle
+        from apps.progress.serializers import MAX_YIELD_T_HA
         from apps.varieties.models import RiceVariety
         from apps.recommendations.models import Recommendation, RecommendationResult
 
@@ -587,7 +608,9 @@ class AdminStatsView(APIView):
         yield_records = YieldRecord.objects.exclude(
             area_harvested_ha__isnull=True
         ).exclude(area_harvested_ha=0)
-        yp_values     = [r.yield_per_ha for r in yield_records if r.yield_per_ha]
+        # A record above the limit is a typing mistake (older ones got in before the check)
+        yp_values     = [r.yield_per_ha for r in yield_records
+                         if r.yield_per_ha and r.yield_per_ha <= MAX_YIELD_T_HA]
         avg_yield_t   = round(sum(yp_values) / len(yp_values), 2) if yp_values else 0
         total_records = yield_records.count()
 

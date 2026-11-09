@@ -98,7 +98,8 @@ def season_board(today=None):
                                 days_over=(today - c.expected_harvest_date).days))
 
     return {
-        'active_crops': len(cycles),
+        # Only sown crops: the ones the stage counts above add up to
+        'active_crops': sum(by_no.values()),
         'stages': stage_rows,
         'attention': {
             'late_steps':      _capped(late, key=lambda r: -r['days_late']),

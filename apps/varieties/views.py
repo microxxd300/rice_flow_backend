@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
 from apps.accounts.permissions import IsSuperUser
 from apps.activity.record import diff, field_list, log_change, notify_variety_planters
+from .limits import variety_problems
 from .models import RiceVariety, GrowthStage, FertilizerSchedule, PestDisease
 from .serializers import (
     RiceVarietySerializer, GrowthStageSerializer,
@@ -143,6 +144,8 @@ class VarietyImportCSVView(APIView):
                     # variety_id is unique and required at the DB level; auto-
                     # fill it from the NSIC code when the CSV omits it.
                     cleaned.setdefault('variety_id', cleaned['nsic_code'])
+                    # The database needs a maximum yield; the column is optional here
+                    cleaned.setdefault('max_yield_t_ha', cleaned['avg_yield_t_ha'])
                     RiceVariety.objects.create(**cleaned)
                     created += 1
             except Exception as e:  # noqa: BLE001
@@ -195,7 +198,8 @@ class VarietyImportCSVView(APIView):
             elif k == 'avg_yield_t_ha':
                 cleaned['avg_yield_t_ha'] = self._to_float(v, errors, 'avg_yield_t_ha')
             elif k == 'max_yield_t_ha':
-                cleaned['max_yield_t_ha'] = self._to_float(v, errors, 'max_yield_t_ha')
+                if v:
+                    cleaned['max_yield_t_ha'] = self._to_float(v, errors, 'max_yield_t_ha')
             elif k in ('submergence_tolerance', 'drought_tolerance', 'salinity_tolerance'):
                 if v and v.lower() not in self.TOLERANCES:
                     errors.append(
@@ -222,6 +226,8 @@ class VarietyImportCSVView(APIView):
         for req in self.REQUIRED:
             if cleaned.get(req) in (None, ''):
                 errors.append(f'{req} is missing')
+        if not errors:
+            errors.extend(variety_problems(cleaned).values())
 
         return cleaned, errors
 

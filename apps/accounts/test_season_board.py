@@ -57,6 +57,13 @@ class SeasonBoardTests(TestCase):
         self.assertEqual(counts[3], 1)
         self.assertEqual(data['active_crops'], 2)
 
+    def test_a_crop_not_sown_yet_is_not_growing(self):
+        self.crop('Sown', 2)
+        self.crop('Planned', -9)
+        data = self.board()
+        self.assertEqual(data['active_crops'], 1)
+        self.assertEqual(sum(s['count'] for s in data['stages']), 1)
+
     def test_a_step_late_by_three_days_needs_attention_but_not_on_time(self):
         late = self.crop('Late', 10)
         on_time = self.crop('OnTime', 10)
@@ -94,6 +101,14 @@ class SeasonBoardTests(TestCase):
         att = self.board()['attention']
         self.assertEqual([(p['farm'], p['kept']) for p in att['flagged_pins']['items']], [('OnRoad', True)])
         self.assertEqual([h['farm'] for h in att['harvest_overdue']['items']], [overdue.farm.name])
+
+    def test_average_yield_leaves_out_an_impossible_harvest(self):
+        for name, kg in (('Real', 5000), ('Typo', 67000)):
+            YieldRecord.objects.create(farm_cycle=self.crop(name, 120), harvest_date=self.today,
+                                       area_harvested_ha=1, gross_yield_kg=kg, net_yield_kg=kg)
+        res = self.client.get('/api/auth/admin-stats/')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data['avg_yield_t_ha'], 5.0)
 
     def test_farmers_cannot_see_it(self):
         self.client.force_authenticate(self.grower)

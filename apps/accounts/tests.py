@@ -1,6 +1,8 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from apps.accounts.models import User
+
 
 class HealthEndpointTests(TestCase):
     def test_health_is_public_and_reports_database(self):
@@ -148,3 +150,53 @@ class ValidatorRoleTests(TestCase):
         self.assertEqual(a.get('/api/auth/users/').status_code, 200)
         self.assertEqual(a.delete(f'/api/progress/admin/cycles/{self.cycle.id}/').status_code, 200)
         self.assertEqual(a.delete(f'/api/farms/admin/{self.farm.id}/').status_code, 204)
+
+
+
+class AdminAccountEditTests(TestCase):
+    def setUp(self):
+        self.me = User.objects.create_superuser('boss', 'boss@example.com', 'pass12345')
+        self.farmer = User.objects.create_user('juan', 'juan@example.com', 'pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.me)
+
+    def edit(self, user, **body):
+        return self.client.patch(f'/api/auth/users/{user.id}/', body, format='json')
+
+    def test_an_admin_cannot_lock_themselves_out(self):
+        self.assertEqual(self.client.patch('/api/auth/users/', {'id': self.me.id, 'is_active': False},
+                                           format='json').status_code, 400)
+        self.assertEqual(self.edit(self.me, is_active=False).status_code, 400)
+        self.assertEqual(self.edit(self.me, role='farmer').status_code, 400)
+        self.me.refresh_from_db()
+        self.assertTrue(self.me.is_active and self.me.is_superuser)
+
+    def test_an_admin_can_still_edit_their_own_profile(self):
+        self.assertEqual(self.edit(self.me, first_name='Ana', role='superadmin', is_active=True).status_code, 200)
+
+    def test_an_admin_can_still_turn_off_someone_else(self):
+        self.assertEqual(self.client.patch('/api/auth/users/', {'id': self.farmer.id, 'is_active': False},
+                                           format='json').status_code, 200)
+
+    def test_an_edit_cannot_empty_the_login_fields(self):
+        self.assertEqual(self.edit(self.farmer, username='  ').status_code, 400)
+        self.assertEqual(self.edit(self.farmer, email='').status_code, 400)
+        self.farmer.refresh_from_db()
+        self.assertEqual((self.farmer.username, self.farmer.email), ('juan', 'juan@example.com'))
+
+    def test_a_bad_email_is_refused(self):
+        res = self.client.post('/api/auth/users/', {'username': 'x1', 'email': 'not-an-email', 'password': 'pass12345'},
+                               format='json')
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('email', res.data)
+        self.assertEqual(self.edit(self.farmer, email='nope').status_code, 400)
+
+
+class LastLoginTests(TestCase):
+    def test_signing_in_records_the_time(self):
+        user = User.objects.create_user('juan', 'juan@example.com', 'pass12345')
+        self.assertIsNone(user.last_login)
+        res = APIClient().post('/api/auth/login/', {'email': 'juan@example.com', 'password': 'pass12345'}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        user.refresh_from_db()
+        self.assertIsNotNone(user.last_login)

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User
@@ -77,6 +78,7 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(username=user_obj.username, password=data['password'])
         if not user:
             raise serializers.ValidationError('Invalid credentials.')
+        update_last_login(None, user)      # for the admin's Users page
         refresh = RefreshToken.for_user(user)
         return {
             'user':          UserSerializer(user).data,
