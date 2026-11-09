@@ -1,5 +1,4 @@
 import hashlib
-import os
 import re
 import time
 import requests
@@ -18,7 +17,7 @@ from apps.advice.services import unsafe
 from .booklets import sources_from
 from .context import farmer_context
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_API_KEY = settings.GEMINI_API_KEY
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent'
 # Free tier: each model has its own small daily pool (20 requests), so when one runs
 # out, is overloaded or is slow, the next answers. Each was checked on farm answers,
@@ -26,7 +25,8 @@ GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{}:generat
 # gemini-2.5-flash-lite is not in the list: it was kept for the planting guide, which no
 # longer uses Gemini; it can be added once it passes the same checks.
 GEMINI_MODELS = ('gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash')
-GEMINI_DEADLINE_SECONDS = 25   # all tries together; the app waits 30
+GEMINI_DEADLINE_SECONDS = 25   # all tries together; the app waits 35
+GEMINI_BOOKLET_SECONDS = 14    # the booklet search's share; the plain chat gets the rest
 
 # With the booklets (Gemini File Search), only these models can search them. Each has its
 # own free daily pool too. Without a store, or when none of them answers, the chat falls
@@ -374,18 +374,22 @@ class AIChatView(APIView):
 
         try:
             data, grounded = None, False
+            started = time.monotonic()
             if store:
                 # Search the booklets first; a store or model that fails leaves time for the plain chat.
                 # Gemini decides by itself whether to search, so the question carries a reminder
                 # (the farmer never sees it; the plain chat gets the question as typed).
                 asked = [*contents[:-1], {'role': 'user', 'parts': [
                     {'text': contents[-1]['parts'][0]['text'] + BOOKLET_NUDGE}]}]
-                data = _ask_gemini({**payload, 'contents': asked,
-                                    'tools': [{'fileSearch': {'fileSearchStoreNames': [store]}}]},
-                                   models=BOOKLET_MODELS, deadline_seconds=GEMINI_DEADLINE_SECONDS - 8)
+                try:
+                    data = _ask_gemini({**payload, 'contents': asked,
+                                        'tools': [{'fileSearch': {'fileSearchStoreNames': [store]}}]},
+                                       models=BOOKLET_MODELS, deadline_seconds=GEMINI_BOOKLET_SECONDS)
+                except requests.exceptions.Timeout:
+                    print('[AI CHAT] the booklet search timed out, using the plain chat', flush=True)
                 grounded = data is not None
             if data is None:
-                data = _ask_gemini(payload)
+                data = _ask_gemini(payload, deadline_seconds=GEMINI_DEADLINE_SECONDS - (time.monotonic() - started))
             if data is None:
                 return Response(
                     {'error': 'The AI is busy right now. Please try again in a minute.'},

@@ -8,12 +8,12 @@ no per-view AI call.
 
 Idempotent: skips varieties that already have a description unless --force.
 """
-import os
 import requests
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from apps.varieties.models import RiceVariety
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_API_KEY = settings.GEMINI_API_KEY
 GEMINI_URL = (
     'https://generativelanguage.googleapis.com/v1beta/models/'
     'gemini-2.5-flash-lite:generateContent'

@@ -1,6 +1,6 @@
 import importlib
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import clear_url_caches
 from rest_framework.test import APIClient
 
@@ -36,3 +36,15 @@ class CorsTests(TestCase):
 
     def test_other_origins_do_not(self):
         self.assertNotIn('Access-Control-Allow-Origin', self.preflight('https://evil.example.com'))
+
+
+class CleanSecretTests(SimpleTestCase):
+    def test_an_invisible_mark_and_spaces_are_removed(self):
+        from config.settings import clean_secret
+        cleaned = clean_secret('\ufeffAIza-key \n')
+        self.assertEqual(cleaned, 'AIza-key')
+        cleaned.encode('latin-1')     # what the HTTP header needs
+
+    def test_a_missing_secret_is_empty(self):
+        from config.settings import clean_secret
+        self.assertEqual(clean_secret(None), '')

@@ -8,7 +8,7 @@ from apps.guides.models import GuideStep
 from apps.farms.models import Farm
 from apps.varieties.models import GrowthStage
 from .models import FarmCycle, ProgressLog, YieldRecord
-from .stages import stage_today
+from .stages import age_stage, stage_today
 
 
 # Writable foreign keys only accept the requesting user's own records, so a farmer
@@ -35,6 +35,8 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     variety_name = serializers.CharField(source='variety.common_name', read_only=True, default=None)
     # Today's stage (age or logged guide steps, see stages.py); current_stage is the saved one
     stage = serializers.SerializerMethodField()
+    # By the crop's age alone: the app still asks about the harvest if the farmer stopped logging
+    age_stage_no = serializers.SerializerMethodField()
 
     class Meta:
         model = FarmCycle
@@ -43,6 +45,10 @@ class FarmCycleSerializer(serializers.ModelSerializer):
     def get_yield_per_ha(self, obj):
         yr = getattr(obj, 'yield_record', None)
         return yr.yield_per_ha if yr else None
+
+    def get_age_stage_no(self, obj):
+        stage = age_stage(obj)
+        return stage.stage_no if stage else None
 
     def get_stage(self, obj):
         stage = stage_today(obj)

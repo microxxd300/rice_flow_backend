@@ -128,8 +128,9 @@ class SowingTests(TestCase):
         self.assertEqual(row['planting_date'], sown.isoformat())
         self.assertEqual(row['expected_harvest_date'], (sown + timedelta(days=113)).isoformat())
 
-    def test_without_logs_the_stage_still_moves_with_time(self):
+    def test_without_logs_the_stage_stays_with_the_guide_and_the_age_is_still_known(self):
         self.answer(sown=True, date=str(self.today - timedelta(days=50)))
         cycle = self.client.get('/api/progress/cycles/').json()
         cycle = (cycle['results'] if isinstance(cycle, dict) else cycle)[0]
-        self.assertEqual(cycle['stage']['name'], 'Stem Elongation')
+        self.assertEqual(cycle['stage']['name'], 'Germination & Seedling')
+        self.assertEqual(cycle['age_stage_no'], 4)     # the app still asks about the harvest by age

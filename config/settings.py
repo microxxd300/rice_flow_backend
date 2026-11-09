@@ -7,6 +7,13 @@ import dj_database_url
 
 load_dotenv()
 
+
+def clean_secret(value):
+    """A pasted key can carry spaces or an invisible byte-order mark. Sent in a header, the
+    mark crashes the request, so every AI call failed on the server."""
+    return (value or '').replace('\ufeff', '').strip()
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Secrets come from the environment only (.env locally, GitHub/host secrets in CI and production)
@@ -49,7 +56,7 @@ INSTALLED_APPS = [
     'apps.advice',
 ]
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_API_KEY = clean_secret(os.getenv('GEMINI_API_KEY'))
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
