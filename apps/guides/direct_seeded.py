@@ -15,6 +15,8 @@ tried in Ilocos and Abra and MDDS in other regions, not in Davao. Herbicide prod
 rates are left out on purpose: the farmer is sent to an agriculturist instead.
 """
 
+import re
+
 EMERGENCE_DAYS = 5
 PI_BEFORE_HARVEST = 60
 
@@ -22,12 +24,12 @@ UPLAND = 'upland'
 RAINFED = 'rainfed_lowland'
 
 UP_REF = 'PalayCheck Upland, 2nd ed.'
-UP_URL = 'https://www.pinoyrice.com/?wpdmdl=3345'
+UP_BOOK = 'upland'
 MDDST_REF = 'PhilRice MDDST'
-MDDST_URL = 'https://www.pinoyrice.com/?wpdmdl=3406'
+MDDST_BOOK = 'mddst'
 MDDS_REF = 'PhilRice MDDS 2022'
-MDDS_URL = ('https://www.philrice.gov.ph/wp-content/uploads/2023/03/'
-            'Book_Mechanized-Dry-Direct-Seeding-using-Multipupose-Seeder-file-for-publishing.pdf')
+MDDS_BOOK = 'mdds'
+BOOKLET_VIEWER_URL = 'https://riceflow.me/booklet.html'
 
 BOOKS = {
     UPLAND: 'PalayCheck System for Upland Rice Farming, 2nd edition (DA-PhilRice)',
@@ -37,40 +39,48 @@ BOOKS = {
 SOWING_KEYS = ('up_sow', 'rf_sow')
 HARVEST_KEYS = ('up_harvest', 'rf_harvest')
 
-# key, KeyCheck (None: not a KeyCheck guide), category, reference text, link
+# key, KeyCheck (None: not a KeyCheck guide), category, reference text, booklet
 _UPLAND_STEPS = [
-    ('up_seeds',   1, 'planting',        f'{UP_REF}, pp. 2-3',    UP_URL),
-    ('up_land',    2, 'planting',        f'{UP_REF}, p. 4',       UP_URL),
-    ('up_organic', 5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_URL),
-    ('up_sync',    3, 'planting',        f'{UP_REF}, p. 5',       UP_URL),
-    ('up_sow',     4, 'planting',        f'{UP_REF}, pp. 6-7',    UP_URL),
-    ('up_weed1',   7, 'pest_prevention', f'{UP_REF}, p. 13',      UP_URL),
-    ('up_fert',    5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_URL),
-    ('up_stand',   4, 'planting',        f'{UP_REF}, p. 7',       UP_URL),
-    ('up_weed2',   7, 'pest_prevention', f'{UP_REF}, p. 13',      UP_URL),
-    ('up_water',   6, 'irrigation',      f'{UP_REF}, p. 9',       UP_URL),
-    ('up_pests',   7, 'pest_prevention', f'{UP_REF}, pp. 10-14',  UP_URL),
-    ('up_fertpi',  5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_URL),
-    ('up_harvest', 8, 'harvesting',      f'{UP_REF}, p. 15',      UP_URL),
-    ('up_store',   8, 'harvesting',      f'{UP_REF}, pp. 15-16',  UP_URL),
+    ('up_seeds',   1, 'planting',        f'{UP_REF}, pp. 2-3',    UP_BOOK),
+    ('up_land',    2, 'planting',        f'{UP_REF}, p. 4',       UP_BOOK),
+    ('up_organic', 5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_BOOK),
+    ('up_sync',    3, 'planting',        f'{UP_REF}, p. 5',       UP_BOOK),
+    ('up_sow',     4, 'planting',        f'{UP_REF}, pp. 6-7',    UP_BOOK),
+    ('up_weed1',   7, 'pest_prevention', f'{UP_REF}, p. 13',      UP_BOOK),
+    ('up_fert',    5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_BOOK),
+    ('up_stand',   4, 'planting',        f'{UP_REF}, p. 7',       UP_BOOK),
+    ('up_weed2',   7, 'pest_prevention', f'{UP_REF}, p. 13',      UP_BOOK),
+    ('up_water',   6, 'irrigation',      f'{UP_REF}, p. 9',       UP_BOOK),
+    ('up_pests',   7, 'pest_prevention', f'{UP_REF}, pp. 10-14',  UP_BOOK),
+    ('up_fertpi',  5, 'fertilizer',      f'{UP_REF}, p. 8',       UP_BOOK),
+    ('up_harvest', 8, 'harvesting',      f'{UP_REF}, p. 15',      UP_BOOK),
+    ('up_store',   8, 'harvesting',      f'{UP_REF}, pp. 15-16',  UP_BOOK),
 ]
 
 _RAINFED_STEPS = [
-    ('rf_seeds',   None, 'planting',        f'{MDDST_REF}, p. 6; {MDDS_REF}, p. 35',  MDDST_URL),
-    ('rf_land',    None, 'planting',        f'{MDDST_REF}, p. 5; {MDDS_REF}, p. 35',  MDDST_URL),
-    ('rf_basal',   None, 'fertilizer',      f'{MDDST_REF}, p. 6',                     MDDST_URL),
-    ('rf_prep',    None, 'planting',        f'{MDDST_REF}, pp. 6-7',                  MDDST_URL),
-    ('rf_sow',     None, 'planting',        f'{MDDST_REF}, pp. 4, 7',                 MDDST_URL),
-    ('rf_water',   None, 'irrigation',      f'{MDDST_REF}, p. 8',                     MDDST_URL),
-    ('rf_weeds',   None, 'pest_prevention', f'{MDDST_REF}, p. 8',                     MDDST_URL),
-    ('rf_top',     None, 'fertilizer',      f'{MDDST_REF}, p. 9; {MDDS_REF}, p. 35',  MDDST_URL),
-    ('rf_pests',   None, 'pest_prevention', f'{MDDST_REF}, p. 9',                     MDDST_URL),
-    ('rf_lcc',     None, 'fertilizer',      f'{MDDST_REF}, p. 9; {MDDS_REF}, p. 35',  MDDST_URL),
-    ('rf_drain',   None, 'irrigation',      f'{MDDS_REF}, p. 35',                     MDDS_URL),
-    ('rf_harvest', None, 'harvesting',      f'{MDDST_REF}, p. 9',                     MDDST_URL),
+    ('rf_seeds',   None, 'planting',        f'{MDDST_REF}, p. 6; {MDDS_REF}, p. 35',  MDDST_BOOK),
+    ('rf_land',    None, 'planting',        f'{MDDST_REF}, p. 5; {MDDS_REF}, p. 35',  MDDST_BOOK),
+    ('rf_basal',   None, 'fertilizer',      f'{MDDST_REF}, p. 6',                     MDDST_BOOK),
+    ('rf_prep',    None, 'planting',        f'{MDDST_REF}, pp. 6-7',                  MDDST_BOOK),
+    ('rf_sow',     None, 'planting',        f'{MDDST_REF}, pp. 4, 7',                 MDDST_BOOK),
+    ('rf_water',   None, 'irrigation',      f'{MDDST_REF}, p. 8',                     MDDST_BOOK),
+    ('rf_weeds',   None, 'pest_prevention', f'{MDDST_REF}, p. 8',                     MDDST_BOOK),
+    ('rf_top',     None, 'fertilizer',      f'{MDDST_REF}, p. 9; {MDDS_REF}, p. 35',  MDDST_BOOK),
+    ('rf_pests',   None, 'pest_prevention', f'{MDDST_REF}, p. 9',                     MDDST_BOOK),
+    ('rf_lcc',     None, 'fertilizer',      f'{MDDST_REF}, p. 9; {MDDS_REF}, p. 35',  MDDST_BOOK),
+    ('rf_drain',   None, 'irrigation',      f'{MDDS_REF}, p. 35',                     MDDS_BOOK),
+    ('rf_harvest', None, 'harvesting',      f'{MDDST_REF}, p. 9',                     MDDST_BOOK),
 ]
 
-REFERENCES = {key: (ref, url) for key, _, _, ref, url in _UPLAND_STEPS + _RAINFED_STEPS}
+
+def _page_url(book: str, reference: str) -> str:
+    """The booklet opened at the pages cited first (riceflow.me shows one page at a time)."""
+    cited = re.search(r'pp?\. ([\d, -]+)', reference.split(';')[0])
+    pages = re.sub(r'[^0-9,-]', '', cited.group(1))
+    return f'{BOOKLET_VIEWER_URL}?b={book}&pages={pages}'
+
+
+REFERENCES = {key: (ref, _page_url(book, ref)) for key, _, _, ref, book in _UPLAND_STEPS + _RAINFED_STEPS}
 
 # The GrowthStage each step belongs to (apps.progress.stages); prep steps have none
 STEP_STAGE = {

@@ -27,6 +27,13 @@ class PlanTests(SimpleTestCase):
                 self.assertTrue(palaycheck.reference_for(step['key']))
                 self.assertTrue(palaycheck.reference_url_for(step['key']).startswith('https://'))
 
+    def test_sources_open_our_viewer_at_the_cited_page(self):
+        self.assertEqual(palaycheck.reference_url_for('up_pests'), 'https://riceflow.me/booklet.html?b=upland&pages=10-14')
+        self.assertEqual(palaycheck.reference_url_for('rf_sow'), 'https://riceflow.me/booklet.html?b=mddst&pages=4,7')
+        # Two booklets cited: the link opens the first
+        self.assertEqual(palaycheck.reference_url_for('rf_seeds'), 'https://riceflow.me/booklet.html?b=mddst&pages=6')
+        self.assertEqual(palaycheck.reference_url_for('rf_drain'), 'https://riceflow.me/booklet.html?b=mdds&pages=35')
+
     def test_direct_seeded_farms_sow_on_day_zero_without_transplanting(self):
         for ecosystem, sow in ((UPLAND, 'up_sow'), (RAINFED, 'rf_sow')):
             days = {s['key']: s['day'] for s in palaycheck.plan(115, ecosystem)}
