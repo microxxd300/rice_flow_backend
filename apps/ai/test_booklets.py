@@ -111,6 +111,25 @@ class BookletChatTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data['reply'], 'Use urea.')
 
+    def test_the_booklet_search_gets_one_long_try_and_the_plain_chat_short_ones(self, _weather):
+        timeouts = []
+
+        def post(url, **kwargs):
+            timeouts.append(('tools' in kwargs['json'], kwargs['timeout']))
+            if 'tools' in kwargs['json']:
+                raise views.requests.exceptions.Timeout()
+            return gemini_reply('Use urea.')
+
+        with patch.object(views.requests, 'post', side_effect=post):
+            self.chat('Fertilizer?')
+        booklet = [t for grounded, t in timeouts if grounded]
+        plain = [t for grounded, t in timeouts if not grounded]
+        self.assertGreater(booklet[0], views.GEMINI_TRY_SECONDS)       # longer than a plain try
+        self.assertLessEqual(booklet[0], views.GEMINI_BOOKLET_SECONDS)
+        self.assertLessEqual(plain[0], views.GEMINI_TRY_SECONDS)
+        # Both together stay inside the time the app waits (35 s)
+        self.assertLess(views.GEMINI_DEADLINE_SECONDS, 35)
+
     def test_a_reply_naming_a_pesticide_is_replaced(self, _weather):
         reply = grounded_reply('Spray cypermethrin today.', [chunk('palaycheck', 52)])
         with patch.object(views.requests, 'post', return_value=reply):
