@@ -12,7 +12,7 @@ from apps.guides.tests import make_variety
 from apps.progress.models import FarmCycle, ProgressLog, YieldRecord
 from apps.varieties.models import GrowthStage
 
-from .season_board import HARVEST_GRACE_DAYS, LATE_DAYS
+from .season_board import HARVEST_GRACE_DAYS, LATE_DAYS, season_start
 
 STAGES = [(1, 'Germination & Seedling', 0), (2, 'Seedling Stage', 7), (3, 'Tillering', 21),
           (4, 'Stem Elongation', 42), (5, 'Booting', 60), (6, 'Heading / Flowering', 75),
@@ -57,6 +57,34 @@ class SeasonBoardTests(TestCase):
         self.assertEqual(counts[3], 1)
         self.assertEqual(data['active_crops'], 2)
 
+    def test_a_crop_not_sown_yet_is_not_growing(self):
+        self.crop('Sown', 2)
+        self.crop('Planned', -9)
+        data = self.board()
+        self.assertEqual(data['active_crops'], 1)
+        self.assertEqual(sum(s['count'] for s in data['stages']), 1)
+        self.assertEqual(data['not_sown'], 1)
+
+    def test_counts_crops_harvested_this_season_only(self):
+        start = season_start(self.today)
+        this = self.crop('ThisSeason', 120)
+        this.status, this.actual_harvest_date = 'completed', self.today
+        this.save()
+        last = self.crop('LastSeason', 300)
+        last.status, last.actual_harvest_date = 'completed', start - timedelta(days=1)
+        last.save()
+        data = self.board()
+        self.assertEqual(data['harvested_this_season'], 1)
+        self.assertEqual(data['active_crops'], 0)
+        self.assertEqual(data['season_start'], start.isoformat())
+
+    def test_season_starts_in_may_and_november(self):
+        from datetime import date
+        self.assertEqual(season_start(date(2026, 11, 10)), date(2026, 11, 1))
+        self.assertEqual(season_start(date(2027, 2, 3)), date(2026, 11, 1))
+        self.assertEqual(season_start(date(2026, 5, 1)), date(2026, 5, 1))
+        self.assertEqual(season_start(date(2026, 10, 31)), date(2026, 5, 1))
+
     def test_a_step_late_by_three_days_needs_attention_but_not_on_time(self):
         late = self.crop('Late', 10)
         on_time = self.crop('OnTime', 10)
@@ -94,6 +122,14 @@ class SeasonBoardTests(TestCase):
         att = self.board()['attention']
         self.assertEqual([(p['farm'], p['kept']) for p in att['flagged_pins']['items']], [('OnRoad', True)])
         self.assertEqual([h['farm'] for h in att['harvest_overdue']['items']], [overdue.farm.name])
+
+    def test_average_yield_leaves_out_an_impossible_harvest(self):
+        for name, kg in (('Real', 5000), ('Typo', 67000)):
+            YieldRecord.objects.create(farm_cycle=self.crop(name, 120), harvest_date=self.today,
+                                       area_harvested_ha=1, gross_yield_kg=kg, net_yield_kg=kg)
+        res = self.client.get('/api/auth/admin-stats/')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data['avg_yield_t_ha'], 5.0)
 
     def test_farmers_cannot_see_it(self):
         self.client.force_authenticate(self.grower)
