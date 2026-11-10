@@ -25,8 +25,11 @@ GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{}:generat
 # gemini-2.5-flash-lite is not in the list: it was kept for the planting guide, which no
 # longer uses Gemini; it can be added once it passes the same checks.
 GEMINI_MODELS = ('gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash')
-GEMINI_DEADLINE_SECONDS = 25   # all tries together; the app waits 35
-GEMINI_BOOKLET_SECONDS = 14    # the booklet search's share; the plain chat gets the rest
+GEMINI_DEADLINE_SECONDS = 30   # all tries together; the app waits 35
+# The booklet search's share; the plain chat gets the rest. A search through the booklets
+# often takes 15-20 seconds, so it gets one long try instead of several short ones.
+GEMINI_BOOKLET_SECONDS = 22
+GEMINI_TRY_SECONDS = 15        # one model's try in the plain chat, so a slow model hands over
 
 # With the booklets (Gemini File Search), only these models can search them. Each has its
 # own free daily pool too. Without a store, or when none of them answers, the chat falls
@@ -242,7 +245,7 @@ def _thinking_config(model: str) -> dict:
     return {'thinkingLevel': 'minimal'} if model.startswith('gemini-3') else {'thinkingBudget': 0}
 
 
-def _ask_gemini(payload, models=None, deadline_seconds=GEMINI_DEADLINE_SECONDS):
+def _ask_gemini(payload, models=None, deadline_seconds=GEMINI_DEADLINE_SECONDS, try_seconds=GEMINI_TRY_SECONDS):
     """Gemini's response, from the first model that answers: one that is out of quota,
     overloaded, failing, rejects the request or is too slow hands over to the next.
     None when none answered in time. Raises Timeout when every try timed out."""
@@ -259,7 +262,7 @@ def _ask_gemini(payload, models=None, deadline_seconds=GEMINI_DEADLINE_SECONDS):
                 GEMINI_URL.format(model),
                 headers={'x-goog-api-key': GEMINI_API_KEY},   # not in the URL, which ends up in logs
                 json=body,
-                timeout=min(15, left),
+                timeout=min(try_seconds, left),
             )
         except requests.exceptions.Timeout:
             print(f'[AI CHAT] {model} timed out, trying the next model', flush=True)
@@ -384,7 +387,8 @@ class AIChatView(APIView):
                 try:
                     data = _ask_gemini({**payload, 'contents': asked,
                                         'tools': [{'fileSearch': {'fileSearchStoreNames': [store]}}]},
-                                       models=BOOKLET_MODELS, deadline_seconds=GEMINI_BOOKLET_SECONDS)
+                                       models=BOOKLET_MODELS, deadline_seconds=GEMINI_BOOKLET_SECONDS,
+                                       try_seconds=GEMINI_BOOKLET_SECONDS)
                 except requests.exceptions.Timeout:
                     print('[AI CHAT] the booklet search timed out, using the plain chat', flush=True)
                 grounded = data is not None
