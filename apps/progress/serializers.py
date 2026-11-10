@@ -100,6 +100,13 @@ class ProgressLogSerializer(serializers.ModelSerializer):
         cycle = attrs.get('farm_cycle', getattr(self.instance, 'farm_cycle', None))
         if step and cycle and step.guide.farm_id != cycle.farm_id:
             raise serializers.ValidationError({'guide_step': "This step is not in this farm's planting guide."})
+        # A step that comes after sowing cannot be done before the crop was sown
+        log_date = attrs.get('log_date')
+        if (step and log_date and (step.days_after_planting or 0) > 0 and sowing.is_sown(step.guide)
+                and log_date < step.guide.start_date):
+            raise serializers.ValidationError({'log_date': (
+                f'This step comes after sowing. Pick {step.guide.start_date:%b} {step.guide.start_date.day} '
+                'or a later day, or change the sowing day first.')})
         # A problem picked from the advice list also fills the problem type
         problem = attrs.get('problem_key')
         if problem and not attrs.get('issue_type'):
