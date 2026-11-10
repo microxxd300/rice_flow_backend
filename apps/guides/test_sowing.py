@@ -110,6 +110,18 @@ class SowingTests(TestCase):
         self.answer(sown=True)
         self.assertNotIn('sowing_estimate', self.log('replant', self.today).data)   # sown now
 
+    def test_a_step_after_sowing_cannot_be_dated_before_the_sowing_day(self):
+        self.answer(sown=True)                                  # sown today
+        res = self.log('transplant', self.today - timedelta(days=3))
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn('log_date', res.data)
+        self.assertFalse(self.step('transplant').is_completed)
+        self.assertEqual(self.log('transplant', self.today).status_code, 201)
+
+    def test_a_past_date_is_fine_when_it_is_not_before_sowing(self):
+        self.answer(sown=True, date=str(self.today - timedelta(days=10)))
+        self.assertEqual(self.log('transplant', self.today - timedelta(days=3)).status_code, 201)
+
     def test_the_stage_follows_the_logged_steps_or_the_days(self):
         self.answer(sown=True)
         self.log('fertilizer1', self.today)                     # day 0, but tillering work is done
