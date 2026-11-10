@@ -7,11 +7,14 @@ need the agriculturist's attention now.
 - flagged_pins:    farms pinned on a road, a building, water or mangrove (location check)
 - harvest_overdue: an active crop HARVEST_GRACE_DAYS past its expected harvest with no yield
 
+Beside the stage counts: crops planned but not sown yet, and crops harvested this season.
+
 Each list is capped at LIST_LIMIT rows (worst first) with its full count beside it.
 """
 from collections import Counter
 from datetime import date, timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.farms.models import Farm
@@ -42,6 +45,13 @@ def _capped(rows, key):
     return {'count': len(rows), 'items': rows[:LIST_LIMIT]}
 
 
+def season_start(today):
+    """First day of the cropping season `today` is in: wet May-October, dry November-April."""
+    if 5 <= today.month <= 10:
+        return date(today.year, 5, 1)
+    return date(today.year if today.month >= 11 else today.year - 1, 11, 1)
+
+
 def season_board(today=None):
     today = today or timezone.localdate()
     cycles = list(FarmCycle.objects.filter(status='active', farm__is_active=True)
@@ -50,10 +60,20 @@ def season_board(today=None):
     # Crops at each of the 10 stages, by the crop's age or its logged steps (stage_today)
     stages = growth_stages()
     by_no = Counter()
+    not_sown = 0
     for c in cycles:
         st = stage_today(c, stages)
         if st:
             by_no[st.stage_no] += 1
+        else:
+            not_sown += 1
+
+    # Crops already harvested since this season began (no longer in the field, so not above)
+    start = season_start(today)
+    harvested = FarmCycle.objects.filter(status='completed', farm__is_active=True).filter(
+        Q(actual_harvest_date__range=(start, today))
+        | Q(actual_harvest_date__isnull=True, yield_record__harvest_date__range=(start, today))
+    ).count()
     stage_rows = [{'stage_no': s.stage_no, 'name': s.name, 'count': by_no.get(s.stage_no, 0)}
                   for s in sorted(stages, key=lambda s: s.stage_no)]
 
@@ -101,6 +121,11 @@ def season_board(today=None):
         # Only sown crops: the ones the stage counts above add up to
         'active_crops': sum(by_no.values()),
         'stages': stage_rows,
+        # Crops outside the stage counts: planned but not sown, and harvested this season
+        'not_sown': not_sown,
+        'harvested_this_season': harvested,
+        'season': 'wet' if start.month == 5 else 'dry',
+        'season_start': start.isoformat(),
         'attention': {
             'late_steps':      _capped(late, key=lambda r: -r['days_late']),
             # worst first, then newest
