@@ -491,13 +491,13 @@ class SystemHealthView(APIView):
                 c.execute('SELECT 1')
                 c.fetchone()
             return {
-                'key': 'database', 'label': 'Supabase database',
+                'key': 'database', 'label': 'PostgreSQL database',
                 'ok': True, 'status': 'operational',
                 'latency_ms': int((time.perf_counter() - started) * 1000),
             }
         except Exception as e:  # noqa: BLE001
             return {
-                'key': 'database', 'label': 'Supabase database',
+                'key': 'database', 'label': 'PostgreSQL database',
                 'ok': False, 'status': 'unreachable',
                 'latency_ms': None, 'error': str(e)[:120],
             }
