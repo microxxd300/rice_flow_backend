@@ -35,6 +35,28 @@ def _crop_guide(cycle):
     return (cycle.variety_id and guides.filter(variety_id=cycle.variety_id).first()) or guides.first()
 
 
+# The admin's five Farm Cycles groups, decided here so every screen counts a crop the same way
+STAGE_GROUPS = (
+    ('land_prep',    'Land Prep'),      # not sown yet: the field is being prepared
+    ('planting',     'Planting'),       # germination, seedling, transplanting
+    ('vegetative',   'Vegetative'),     # tillering, stem elongation
+    ('reproductive', 'Reproductive'),   # booting, heading and flowering, grain filling
+    ('harvesting',   'Harvesting'),     # ripening, harvest, after harvest
+)
+GROUP_LABEL = dict(STAGE_GROUPS)
+_GROUP_BY_STAGE_NO = {1: 'planting', 2: 'planting', 3: 'vegetative', 4: 'vegetative',
+                      5: 'reproductive', 6: 'reproductive', 7: 'reproductive',
+                      8: 'harvesting', 9: 'harvesting', 10: 'harvesting'}
+
+
+def stage_group(cycle, stage) -> str | None:
+    """The crop's group from its stage today (stage_today): an active crop not sown yet is in
+    Land Prep. None for a crop that is neither growing nor planned."""
+    if stage is None:
+        return 'land_prep' if cycle.status == 'active' else None
+    return _GROUP_BY_STAGE_NO.get(stage.stage_no)
+
+
 def growth_stages() -> list:
     """All stages in order; load once and pass to stage_today() for many cycles."""
     return list(GrowthStage.objects.order_by('stage_no'))
