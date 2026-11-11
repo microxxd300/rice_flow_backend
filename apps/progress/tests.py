@@ -242,3 +242,12 @@ class StageTodayTests(TestCase):
         client.force_authenticate(self.admin)
         row = client.get('/api/progress/admin/cycles/').data[0]
         self.assertEqual((row['current_stage'], row['stage_no']), ('Booting', 5))
+        self.assertEqual((row['stage_group'], row['stage_group_label']), ('reproductive', 'Reproductive'))
+
+    def test_every_crop_has_a_group_and_a_crop_not_sown_yet_is_in_land_prep(self):
+        from .stages import stage_group, stage_today
+        planned, seedling, tillering = self.cycle(-5), self.cycle(0), self.cycle(25)
+        harvested = self.cycle(130, status='completed')
+        groups = [stage_group(c, stage_today(c)) for c in (planned, seedling, tillering, harvested)]
+        self.assertEqual(groups, ['land_prep', 'planting', 'vegetative', 'harvesting'])
+        self.assertIsNone(stage_group(self.cycle(-5, status='abandoned'), None))

@@ -9,7 +9,7 @@ from apps.predictions.history import after_harvest_recorded
 from apps.predictions.services import features_for_cycle, predict_yield, save_prediction
 from .models import FarmCycle, ProgressLog
 from .serializers import FarmCycleSerializer, ProgressLogSerializer, YieldRecordSerializer
-from .stages import growth_stages, stage_today
+from .stages import GROUP_LABEL, growth_stages, stage_group, stage_today
 
 
 def _clean_full_name(u):
@@ -51,6 +51,7 @@ class AdminFarmCycleListView(APIView):
         for c in cycles:
             yr   = getattr(c, 'yield_record', None)
             stage = stage_today(c, stages)
+            group = stage_group(c, stage)
             farm = c.farm
             user = farm.user
             data.append({
@@ -75,6 +76,9 @@ class AdminFarmCycleListView(APIView):
                 'actual_harvest_date':   c.actual_harvest_date.isoformat()   if c.actual_harvest_date   else None,
                 'current_stage':         stage.name if stage else None,
                 'stage_no':              stage.stage_no if stage else None,
+                # Farm Cycles' group (Land Prep ... Harvesting): one rule, here (stages.py)
+                'stage_group':           group,
+                'stage_group_label':     GROUP_LABEL.get(group),
                 'status':                c.status,
                 'yield_t_ha':            yr.yield_per_ha if yr else None,
                 'created_at':            c.created_at.isoformat(),
