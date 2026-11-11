@@ -35,7 +35,8 @@ GEMINI_TRY_SECONDS = 15        # one model's try in the plain chat, so a slow mo
 # own free daily pool too. Without a store, or when none of them answers, the chat falls
 # back to GEMINI_MODELS without the booklets.
 BOOKLET_MODELS = ('gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite')
-BOOKLET_NUDGE = '\n\n(Search the DA-PhilRice booklets before answering.)'
+BOOKLET_NUDGE = ('\n\n(Use the File Search tool on the DA-PhilRice booklets before answering, '
+                 'even if you already know the answer. Answer from what you find.)')
 
 # A reply naming a pesticide is not shown: the farmer is sent to an agriculturist instead
 CHEMICAL_REPLY = {
@@ -76,9 +77,11 @@ suggest checking the matching tab."""
 
 
 BOOKLET_RULE = """7. You can search the official DA-PhilRice booklets (PalayCheck System 2022, Key Check 7,
-   the field guide to harmful organisms, and the disease, snail and pest handouts). For any
-   rice-farming practice, search them first and answer from what you find there, not from
-   memory. If they do not cover the question, say so in one short sentence and give careful
+   the field guide to harmful organisms, and the disease, snail and pest handouts). ALWAYS
+   use the File Search tool on them before you answer any rice-farming question, even when
+   you think you already know the answer, and answer from what you find there, not from
+   memory. Farmers trust an answer more when it shows the booklet pages it came from. If the
+   booklets do not cover the question, say so in one short sentence and give careful
    general advice. Never name a pesticide or chemical product; send the farmer to an
    agriculturist for those. Do not write page numbers or booklet titles in your reply, even
    for the planting-guide step: the app shows the booklet pages you used under your answer.
