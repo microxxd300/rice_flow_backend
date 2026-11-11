@@ -78,7 +78,7 @@ class BookletChatTests(TestCase):
         sent = post.call_args.kwargs['json']
         self.assertEqual(sent['tools'], [{'fileSearch': {'fileSearchStoreNames': [STORE]}}])
         self.assertIn(post.call_args.args[0].split('/models/')[1].split(':')[0], views.BOOKLET_MODELS)
-        self.assertIn('search them first', sent['systemInstruction']['parts'][0]['text'])
+        self.assertIn('use the File Search tool on them before you answer', sent['systemInstruction']['parts'][0]['text'])
         self.assertTrue(sent['contents'][-1]['parts'][0]['text'].startswith('Stem borer?'))
         self.assertTrue(sent['contents'][-1]['parts'][0]['text'].endswith(views.BOOKLET_NUDGE))
         self.assertEqual(res.data['reply'], 'Check for egg masses early in the morning.')
