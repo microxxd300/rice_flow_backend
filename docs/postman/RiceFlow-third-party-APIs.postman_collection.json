@@ -1,0 +1,596 @@
+{
+  "info": {
+    "_postman_id": "7e7081a5-2d2d-5470-a19d-e82f2ac558fb",
+    "name": "RiceFlow Third-Party APIs",
+    "description": "The third-party (outside) APIs RiceFlow uses, with the same parameters the system sends. Point: Panabo City (7.3086, 125.6830).\n\n| Service | What RiceFlow gets | Key? | Where |\n|---|---|---|---|\n| Open-Meteo Forecast | 7-day weather for the scan; hourly forecast for the weather card and guide warnings | No | Backend |\n| Open-Meteo Archive | Past rainfall: seasonal and monthly | No | Backend |\n| Open-Meteo Elevation | Farm elevation | No | Backend |\n| OpenLandMap-soildb (Zenodo) | Soil maps, downloaded once for Panabo | No | Backend (setup) |\n| ISRIC SoilGrids (REST + WMS) | Backup soil values | No | Backend |\n| OpenStreetMap Nominatim + tiles | Place names and the background map | No (User-Agent) | Admin website |\n| Google Gemini | GeoRice AI chat and problem advice | Yes | Backend |\n\n**Also used, but not REST APIs you can call in Postman:**\n- **Google Maps SDK for Android**: the map where the farmer pins the farm (in the app, with a Google Maps API key).\n- **Resend**: sends the forgot-password code email from noreply@riceflow.me over SMTP (`smtp.resend.com`).\n- **Data files downloaded once** (not called while the system runs): ESA WorldCover 2021 and Google Open Buildings (pin checks for roads, buildings and water), BSWM Philippine Soil Series (soil texture), and NAMRIA/PSA barangay boundaries.\n\nOnly the Gemini folder needs a key: set `gemini_api_key` in the collection variables (Current value).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Status ' + pm.response.code + ' is OK', () => pm.expect(pm.response.code).to.be.below(400));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "gemini_api_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "gemini_model",
+      "value": "gemini-2.5-flash",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Open-Meteo (weather, rainfall, elevation)",
+      "description": "Free weather API, no key, no sign-up (open-meteo.com, CC BY 4.0). Used by the backend in `apps/environmental/services/openmeteo.py` and `apps/environmental/views.py`.",
+      "item": [
+        {
+          "name": "Forecast: 7-day weather for the land scan",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the environmental scan. RiceFlow averages the 7 days into temperature, weekly rainfall, humidity, solar radiation, wind and sunshine hours, which feed the RSI score and the flood-risk check.\n\n**Code:** `get_current_weather()`.",
+            "header": [],
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/forecast?latitude=7.3086&longitude=125.683&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_max,shortwave_radiation_sum,windspeed_10m_max,sunshine_duration&timezone=Asia/Manila&forecast_days=7",
+              "protocol": "https",
+              "host": [
+                "api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "forecast"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.683"
+                },
+                {
+                  "key": "daily",
+                  "value": "temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_max,shortwave_radiation_sum,windspeed_10m_max,sunshine_duration"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                },
+                {
+                  "key": "forecast_days",
+                  "value": "7"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Forecast: hourly weather for the dashboard and guide warnings",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the weather card in the app and the planting guide's weather warnings (rain, wind, heat in the next 6/24/48 hours). The backend caches it for 10 minutes per ~1 km area, shared by all farmers.\n\n**Code:** `WeatherForecastView`.",
+            "header": [],
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/forecast?latitude=7.3086&longitude=125.683&current=temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m&hourly=temperature_2m,weather_code,precipitation,precipitation_probability,wind_speed_10m&forecast_days=3&timezone=Asia/Manila",
+              "protocol": "https",
+              "host": [
+                "api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "forecast"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.683"
+                },
+                {
+                  "key": "current",
+                  "value": "temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m"
+                },
+                {
+                  "key": "hourly",
+                  "value": "temperature_2m,weather_code,precipitation,precipitation_probability,wind_speed_10m"
+                },
+                {
+                  "key": "forecast_days",
+                  "value": "3"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Archive: rainfall of the last 12 months",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** seasonal rainfall in the scan. RiceFlow adds up the wet-season (May-Oct) and dry-season (Nov-Apr) rain of the last year, because the RSI rule expects a whole season (about 1,000-1,500 mm).\n\n**Code:** `get_rainfall_summary()`.",
+            "header": [],
+            "url": {
+              "raw": "https://archive-api.open-meteo.com/v1/archive?latitude=7.3086&longitude=125.683&start_date=2025-11-01&end_date=2026-10-31&daily=precipitation_sum&timezone=Asia/Manila",
+              "protocol": "https",
+              "host": [
+                "archive-api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "archive"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.683"
+                },
+                {
+                  "key": "start_date",
+                  "value": "2025-11-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-10-31"
+                },
+                {
+                  "key": "daily",
+                  "value": "precipitation_sum"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Archive: average rain per month (3 years)",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the planting calendar (average rain for each month, January to December).\n\n**Code:** `get_monthly_rainfall()`.",
+            "header": [],
+            "url": {
+              "raw": "https://archive-api.open-meteo.com/v1/archive?latitude=7.3086&longitude=125.683&start_date=2023-01-01&end_date=2025-12-31&daily=precipitation_sum&timezone=Asia/Manila",
+              "protocol": "https",
+              "host": [
+                "archive-api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "archive"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.683"
+                },
+                {
+                  "key": "start_date",
+                  "value": "2023-01-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-12-31"
+                },
+                {
+                  "key": "daily",
+                  "value": "precipitation_sum"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Elevation",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the farm's elevation in metres (90 m Copernicus DEM). It is an RSI factor and part of the flood-risk rule (rainfed farm below 50 m).\n\n**Code:** `get_elevation()`.",
+            "header": [],
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/elevation?latitude=7.3086&longitude=125.683",
+              "protocol": "https",
+              "host": [
+                "api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "elevation"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.683"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Soil: OpenLandMap and SoilGrids",
+      "description": "Soil pH, clay/sand/silt, organic carbon, bulk density, nitrogen and CEC. RiceFlow reads **OpenLandMap-soildb** first (saved once for Panabo from Zenodo, so a scan reads it locally in about a second) and calls **ISRIC SoilGrids** only as a backup. Both are free, no key (CC BY 4.0).",
+      "item": [
+        {
+          "name": "OpenLandMap-soildb on Zenodo (pH map record)",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** downloading the OpenLandMap soil maps once (2020-2022, 0-30 cm, 120 m). The record lists the map files; RiceFlow reads only the Panabo part of the mean map and saves it.\n\nOther layers: clay 15528401, sand 15528413, silt 15528425, organic carbon 15535760, bulk density 15471055 (change the number in the URL).\n\n**Code:** `python manage.py load_openlandmap` (`apps/environmental/management/commands/load_openlandmap.py`). Not called during a scan.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15471105",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15471105"
+              ]
+            }
+          }
+        },
+        {
+          "name": "SoilGrids REST: soil at a point",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** backup soil values when a point is outside the saved OpenLandMap area. RiceFlow takes the median (Q0.5) of the top 30 cm, weighted by layer thickness. Can be slow (up to 40 s) or paused; the scan waits at most 20 s.\n\n**Code:** `apps/environmental/services/soilgrids.py`.",
+            "header": [],
+            "url": {
+              "raw": "https://rest.isric.org/soilgrids/v2.0/properties/query?lon=125.683&lat=7.3086&property=phh2o&property=clay&property=sand&property=silt&property=soc&property=bdod&property=nitrogen&property=cec&depth=0-5cm&depth=5-15cm&depth=15-30cm&value=Q0.5",
+              "protocol": "https",
+              "host": [
+                "rest",
+                "isric",
+                "org"
+              ],
+              "path": [
+                "soilgrids",
+                "v2.0",
+                "properties",
+                "query"
+              ],
+              "query": [
+                {
+                  "key": "lon",
+                  "value": "125.683"
+                },
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "property",
+                  "value": "phh2o"
+                },
+                {
+                  "key": "property",
+                  "value": "clay"
+                },
+                {
+                  "key": "property",
+                  "value": "sand"
+                },
+                {
+                  "key": "property",
+                  "value": "silt"
+                },
+                {
+                  "key": "property",
+                  "value": "soc"
+                },
+                {
+                  "key": "property",
+                  "value": "bdod"
+                },
+                {
+                  "key": "property",
+                  "value": "nitrogen"
+                },
+                {
+                  "key": "property",
+                  "value": "cec"
+                },
+                {
+                  "key": "depth",
+                  "value": "0-5cm"
+                },
+                {
+                  "key": "depth",
+                  "value": "5-15cm"
+                },
+                {
+                  "key": "depth",
+                  "value": "15-30cm"
+                },
+                {
+                  "key": "value",
+                  "value": "Q0.5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "SoilGrids WMS: one value (when the REST API is paused)",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the same SoilGrids maps through the map server, when the REST API is down. Returns HTML; RiceFlow reads the number in it (pH x 10, so 55 = pH 5.5).\n\n**Code:** `_wms_median()` in `apps/environmental/services/soilgrids.py`.",
+            "header": [],
+            "url": {
+              "raw": "https://maps.isric.org/mapserv?map=/map/phh2o.map&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=phh2o_0-5cm_Q0.5&QUERY_LAYERS=phh2o_0-5cm_Q0.5&SRS=EPSG:4326&STYLES=&BBOX=125.6825,7.3081,125.6835,7.3091&WIDTH=3&HEIGHT=3&X=1&Y=1&INFO_FORMAT=text/html&FORMAT=image/png",
+              "protocol": "https",
+              "host": [
+                "maps",
+                "isric",
+                "org"
+              ],
+              "path": [
+                "mapserv"
+              ],
+              "query": [
+                {
+                  "key": "map",
+                  "value": "/map/phh2o.map"
+                },
+                {
+                  "key": "SERVICE",
+                  "value": "WMS"
+                },
+                {
+                  "key": "VERSION",
+                  "value": "1.1.1"
+                },
+                {
+                  "key": "REQUEST",
+                  "value": "GetFeatureInfo"
+                },
+                {
+                  "key": "LAYERS",
+                  "value": "phh2o_0-5cm_Q0.5"
+                },
+                {
+                  "key": "QUERY_LAYERS",
+                  "value": "phh2o_0-5cm_Q0.5"
+                },
+                {
+                  "key": "SRS",
+                  "value": "EPSG:4326"
+                },
+                {
+                  "key": "STYLES",
+                  "value": ""
+                },
+                {
+                  "key": "BBOX",
+                  "value": "125.6825,7.3081,125.6835,7.3091"
+                },
+                {
+                  "key": "WIDTH",
+                  "value": "3"
+                },
+                {
+                  "key": "HEIGHT",
+                  "value": "3"
+                },
+                {
+                  "key": "X",
+                  "value": "1"
+                },
+                {
+                  "key": "Y",
+                  "value": "1"
+                },
+                {
+                  "key": "INFO_FORMAT",
+                  "value": "text/html"
+                },
+                {
+                  "key": "FORMAT",
+                  "value": "image/png"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. OpenStreetMap (admin website map)",
+      "description": "Free OpenStreetMap services, no key. Used by the admin website. OSM asks every app to identify itself (User-Agent) and to stay under 1 request per second.",
+      "item": [
+        {
+          "name": "Nominatim: place name of a farm pin",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the admin website shows a readable place name for a farm pin, and the admin's System Health page checks that it is up. The farm's **barangay** is not from here: it comes from the official NAMRIA/PSA boundaries saved in the backend.\n\n**Code:** `rice-flow-admin/src/services/geocode.js`, `SystemHealthView`. Postman needs the User-Agent header below, or OSM answers 403.",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "RiceFlow/1.0 (https://riceflow.me)"
+              }
+            ],
+            "url": {
+              "raw": "https://nominatim.openstreetmap.org/reverse?lat=7.3086&lon=125.683&format=json&zoom=14&addressdetails=1",
+              "protocol": "https",
+              "host": [
+                "nominatim",
+                "openstreetmap",
+                "org"
+              ],
+              "path": [
+                "reverse"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "lon",
+                  "value": "125.683"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                },
+                {
+                  "key": "zoom",
+                  "value": "14"
+                },
+                {
+                  "key": "addressdetails",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Map tile (Panabo)",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** the background map of the admin website's Farm Map (Leaflet). Each tile is a 256 px PNG; this one is zoom 13 over Panabo City. Postman shows the image.\n\n**Code:** `rice-flow-admin/src/pages/FarmMap.jsx`.",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "RiceFlow/1.0 (https://riceflow.me)"
+              }
+            ],
+            "url": {
+              "raw": "https://tile.openstreetmap.org/13/6955/3929.png",
+              "protocol": "https",
+              "host": [
+                "tile",
+                "openstreetmap",
+                "org"
+              ],
+              "path": [
+                "13",
+                "6955",
+                "3929.png"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Google Gemini (GeoRice AI)",
+      "description": "Google's Gemini API, used for the AI chat and the problem advice. **Needs an API key**: paste it into the collection variable `gemini_api_key` (Current value only, never share it). Free tier: about 20 answers a day per model, shared by all RiceFlow farmers, so send **List models** freely but **Ask Gemini** only once.",
+      "item": [
+        {
+          "name": "List models (checks the key, no answer quota used)",
+          "request": {
+            "method": "GET",
+            "description": "**Used for:** showing the key works and which models it can use. RiceFlow tries, in order: gemini-3.5-flash, gemini-3.1-flash-lite, gemini-3.5-flash-lite, gemini-2.5-flash.",
+            "header": [
+              {
+                "key": "x-goog-api-key",
+                "value": "{{gemini_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "https://generativelanguage.googleapis.com/v1beta/models",
+              "protocol": "https",
+              "host": [
+                "generativelanguage",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "v1beta",
+                "models"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ask Gemini (one answer)",
+          "request": {
+            "method": "POST",
+            "description": "**Used for:** GeoRice AI. RiceFlow sends the farmer's question with the farm's scan, variety, crop day, current guide step and weather, and first searches the DA-PhilRice booklets with Gemini File Search (the backend adds `tools: [{fileSearch: ...}]`). The key goes in the `x-goog-api-key` header, never in the URL.\n\n**Code:** `apps/ai/views.py`. Uses 1 of the day's free answers.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-goog-api-key",
+                "value": "{{gemini_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contents\": [\n    {\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"text\": \"In two sentences: when should a farmer in Panabo City apply the first fertilizer to transplanted rice?\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.3,\n    \"maxOutputTokens\": 300\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://generativelanguage.googleapis.com/v1beta/models/{{gemini_model}}:generateContent",
+              "protocol": "https",
+              "host": [
+                "generativelanguage",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "v1beta",
+                "models",
+                "{{gemini_model}}:generateContent"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
