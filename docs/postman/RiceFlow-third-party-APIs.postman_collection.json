@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "7e7081a5-2d2d-5470-a19d-e82f2ac558fb",
     "name": "RiceFlow Third-Party APIs",
-    "description": "The third-party (outside) APIs RiceFlow uses, with the same parameters the system sends. Point: Panabo City (7.3086, 125.6830).\n\n| Service | What RiceFlow gets | Key? | Where |\n|---|---|---|---|\n| Open-Meteo Forecast | 7-day weather for the scan; hourly forecast for the weather card and guide warnings | No | Backend |\n| Open-Meteo Archive | Past rainfall: seasonal and monthly | No | Backend |\n| Open-Meteo Elevation | Farm elevation | No | Backend |\n| OpenLandMap-soildb (Zenodo) | Soil maps, downloaded once for Panabo | No | Backend (setup) |\n| ISRIC SoilGrids (REST + WMS) | Backup soil values | No | Backend |\n| OpenStreetMap Nominatim + tiles | Place names and the background map | No (User-Agent) | Admin website |\n| Google Gemini | GeoRice AI chat and problem advice | Yes | Backend |\n\n**Also used, but not REST APIs you can call in Postman:**\n- **Google Maps SDK for Android**: the map where the farmer pins the farm (in the app, with a Google Maps API key).\n- **Resend**: sends the forgot-password code email from noreply@riceflow.me over SMTP (`smtp.resend.com`).\n- **Data files downloaded once** (not called while the system runs): ESA WorldCover 2021 and Google Open Buildings (pin checks for roads, buildings and water), BSWM Philippine Soil Series (soil texture), and NAMRIA/PSA barangay boundaries.\n\nOnly the Gemini folder needs a key: set `gemini_api_key` in the collection variables (Current value).",
+    "description": "The third-party (outside) APIs RiceFlow uses, with the same parameters the system sends. Point: Panabo City (7.3086, 125.6830).\n\n| Service | What RiceFlow gets | Key? | Where |\n|---|---|---|---|\n| Open-Meteo Forecast | 7-day weather for the scan; hourly forecast for the weather card and guide warnings | No | Backend |\n| Open-Meteo Archive | Past rainfall: seasonal and monthly | No | Backend |\n| Open-Meteo Elevation | Farm elevation | No | Backend |\n| **OpenLandMap-soildb** (via Zenodo) | **Main soil source**: pH, texture, organic matter, bulk density. Downloaded once for Panabo, read locally at every scan | No | Backend |\n| ISRIC SoilGrids (REST + WMS) | Backup soil values | No | Backend |\n| OpenStreetMap Nominatim + tiles | Place names and the background map | No (User-Agent) | Admin website |\n| Google Gemini | GeoRice AI chat and problem advice | Yes | Backend |\n\n**Also used, but not REST APIs you can call in Postman:**\n- **Google Maps SDK for Android**: the map where the farmer pins the farm (in the app, with a Google Maps API key).\n- **Resend**: sends the forgot-password code email from noreply@riceflow.me over SMTP (`smtp.resend.com`).\n- **Data files downloaded once** (not called while the system runs): ESA WorldCover 2021 and Google Open Buildings (pin checks for roads, buildings and water), BSWM Philippine Soil Series (soil texture), and NAMRIA/PSA barangay boundaries.\n\nOnly the Gemini folder needs a key: set `gemini_api_key` in the collection variables (Current value).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -251,14 +251,14 @@
       ]
     },
     {
-      "name": "2. Soil: OpenLandMap and SoilGrids",
-      "description": "Soil pH, clay/sand/silt, organic carbon, bulk density, nitrogen and CEC. RiceFlow reads **OpenLandMap-soildb** first (saved once for Panabo from Zenodo, so a scan reads it locally in about a second) and calls **ISRIC SoilGrids** only as a backup. Both are free, no key (CC BY 4.0).",
+      "name": "2. OpenLandMap-soildb (main soil source)",
+      "description": "**RiceFlow's main soil source.** OpenLandMap-soildb by OpenGeoHub: soil maps for 2020-2022, 0-30 cm depth, 120 m pixels, free, no key (CC BY 4.0, https://doi.org/10.5281/zenodo.15608972). The maps are published on **Zenodo**, so the API is Zenodo's records API: each request below returns one map's record and its file links.\n\n**How RiceFlow uses it:** `python manage.py load_openlandmap` downloads the Panabo City part of these 6 maps once and saves it on the server. Every scan then reads the soil from that saved file in about a second, with no internet call, so scans keep working when outside soil services are down. A scan shows `soil_source: \"openlandmap\"` (see GET /api/environmental/history/{farm_id}/ on RiceFlow's own API).\n\nOpenLandMap has no nitrogen or CEC maps: those two use default values.\n\n**Code:** `apps/environmental/management/commands/load_openlandmap.py` (download), `apps/environmental/services/openlandmap.py` (read at scan time).",
       "item": [
         {
-          "name": "OpenLandMap-soildb on Zenodo (pH map record)",
+          "name": "OpenLandMap: soil pH",
           "request": {
             "method": "GET",
-            "description": "**Used for:** downloading the OpenLandMap soil maps once (2020-2022, 0-30 cm, 120 m). The record lists the map files; RiceFlow reads only the Panabo part of the mean map and saves it.\n\nOther layers: clay 15528401, sand 15528413, silt 15528425, organic carbon 15535760, bulk density 15471055 (change the number in the URL).\n\n**Code:** `python manage.py load_openlandmap` (`apps/environmental/management/commands/load_openlandmap.py`). Not called during a scan.",
+            "description": "**Map:** soil pH. **RiceFlow uses it for:** soil pH, an RSI factor.\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
             "header": [],
             "url": {
               "raw": "https://zenodo.org/api/records/15471105",
@@ -275,6 +275,117 @@
             }
           }
         },
+        {
+          "name": "OpenLandMap: clay %",
+          "request": {
+            "method": "GET",
+            "description": "**Map:** clay %. **RiceFlow uses it for:** soil texture (with sand and silt).\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15528401",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15528401"
+              ]
+            }
+          }
+        },
+        {
+          "name": "OpenLandMap: sand %",
+          "request": {
+            "method": "GET",
+            "description": "**Map:** sand %. **RiceFlow uses it for:** soil texture (with clay and silt).\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15528413",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15528413"
+              ]
+            }
+          }
+        },
+        {
+          "name": "OpenLandMap: silt %",
+          "request": {
+            "method": "GET",
+            "description": "**Map:** silt %. **RiceFlow uses it for:** soil texture (with clay and sand).\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15528425",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15528425"
+              ]
+            }
+          }
+        },
+        {
+          "name": "OpenLandMap: organic carbon",
+          "request": {
+            "method": "GET",
+            "description": "**Map:** organic carbon. **RiceFlow uses it for:** organic matter (organic carbon x 1.724), an RSI factor.\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15535760",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15535760"
+              ]
+            }
+          }
+        },
+        {
+          "name": "OpenLandMap: bulk density",
+          "request": {
+            "method": "GET",
+            "description": "**Map:** bulk density. **RiceFlow uses it for:** bulk density of the soil.\n\nThe record's `files` list has the map files; RiceFlow reads the mean map for 2020-2022.",
+            "header": [],
+            "url": {
+              "raw": "https://zenodo.org/api/records/15471055",
+              "protocol": "https",
+              "host": [
+                "zenodo",
+                "org"
+              ],
+              "path": [
+                "api",
+                "records",
+                "15471055"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. ISRIC SoilGrids (backup soil source)",
+      "description": "**Backup only.** Called when a farm pin is outside the saved OpenLandMap area, or the saved file is missing. Free, no key (CC BY 4.0). The REST API is slow and is paused at times, so the WMS map server is the second backup, and default values are the last.\n\n**Code:** `get_soil_data()` in `apps/environmental/services/soilgrids.py`.",
+      "item": [
         {
           "name": "SoilGrids REST: soil at a point",
           "request": {
@@ -441,7 +552,7 @@
       ]
     },
     {
-      "name": "3. OpenStreetMap (admin website map)",
+      "name": "4. OpenStreetMap (admin website map)",
       "description": "Free OpenStreetMap services, no key. Used by the admin website. OSM asks every app to identify itself (User-Agent) and to stay under 1 request per second.",
       "item": [
         {
@@ -521,7 +632,7 @@
       ]
     },
     {
-      "name": "4. Google Gemini (GeoRice AI)",
+      "name": "5. Google Gemini (GeoRice AI)",
       "description": "Google's Gemini API, used for the AI chat and the problem advice. **Needs an API key**: paste it into the collection variable `gemini_api_key` (Current value only, never share it). Free tier: about 20 answers a day per model, shared by all RiceFlow farmers, so send **List models** freely but **Ask Gemini** only once.",
       "item": [
         {
