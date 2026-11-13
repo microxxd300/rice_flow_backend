@@ -1,0 +1,2431 @@
+{
+  "info": {
+    "_postman_id": "be9e2214-dc65-51b7-bbfb-1d29175e74ad",
+    "name": "RiceFlow API",
+    "description": "Every endpoint of the RiceFlow backend (Django REST Framework), live at https://api.riceflow.me.\n\n**How to use**\n1. Collection variables: fill in `farmer_email`/`farmer_password` (a test farmer account) and `admin_email`/`admin_password`. Keep passwords in the **Current value** column only, so they are not shared.\n2. Send **1. Auth > Login (farmer)** and **Login (admin)**. The tokens are saved for you.\n3. Go down the folders in order. Create, scan, recommend and guide requests save the ids (`farm_id`, `scan_id`, `recommendation_id`, `guide_id`, `cycle_id`, ...) for the next request.\n\nEvery URL ends with `/`. Lists may come in pages (`results`, `next`). Folder 9 uses the free Gemini quota. Folder 13 changes live data and is locked.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// A crop with no harvest yet has no harvest record: 404 is the right answer there",
+          "const fine = pm.response.code < 400 || (pm.response.code === 404 && pm.info.requestName === 'Harvest record');",
+          "pm.test('Status ' + pm.response.code + ' is expected', () => pm.expect(fine).to.eql(true));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.riceflow.me/api",
+      "type": "string"
+    },
+    {
+      "key": "farmer_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "farmer_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "farm_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "scan_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "recommendation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "variety_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guide_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "step_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cycle_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "log_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "target_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "allow_live_changes",
+      "value": "no",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "description": "Is the server and its database up? No login needed.",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                ""
+              ]
+            },
+            "description": "Returns `status`, `database` and `version` (the deployed git commit). 503 if the database is down. Used by the CD pipeline to confirm a deploy.\n\nWho: anyone (no token).",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Auth (accounts)",
+      "description": "Sign-up, login with JWT, profile, token refresh, logout and forgot password.",
+      "item": [
+        {
+          "name": "Register a farmer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register",
+                ""
+              ]
+            },
+            "description": "Creates a farmer account. Gmail addresses only (`@gmail.com` / `@googlemail.com`), otherwise 400 on `email`. The barangay is taken later from the first farm pin.\n\nWho: anyone (no token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan.delacruz.test@gmail.com\",\n  \"password\": \"Bagong-Palay-77\",\n  \"password2\": \"Bagong-Palay-77\",\n  \"first_name\": \"Juan\",\n  \"last_name\": \"Dela Cruz\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Login (farmer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "description": "Returns `user`, `access_token` and `refresh_token`. **The test script saves the token into `access_token`**, so every farmer request after this works without copy-paste.\n\nFill in `farmer_email` and `farmer_password` in the collection variables first. Too many failed logins return 429.\n\nWho: anyone (no token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{farmer_email}}\",\n  \"password\": \"{{farmer_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Logged in', () => pm.expect(j.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('access_token', j.access_token);",
+                  "pm.collectionVariables.set('refresh_token', j.refresh_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "description": "Same login, for the admin website account. **Saves the token into `admin_token`**, used by the Admin folders.\n\nFill in `admin_email` and `admin_password` in the collection variables first.\n\nWho: anyone (no token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Logged in as staff', () => pm.expect(j.user.is_staff).to.eql(true));",
+                  "pm.collectionVariables.set('admin_token', j.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/profile/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "profile",
+                ""
+              ]
+            },
+            "description": "The signed-in user's account: name, email, phone, barangay, `has_farm`.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Update my profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/profile/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "profile",
+                ""
+              ]
+            },
+            "description": "Changes the user's own name or phone.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Juan\",\n  \"last_name\": \"Dela Cruz\",\n  \"phone\": \"09171234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Refresh the access token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/token/refresh/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "token",
+                "refresh",
+                ""
+              ]
+            },
+            "description": "Access tokens expire. Send the refresh token to get a new access token (saved by the test script).\n\nWho: anyone with a refresh token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.access) pm.collectionVariables.set('access_token', j.access);",
+                  "if (j.refresh) pm.collectionVariables.set('refresh_token', j.refresh);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout",
+                ""
+              ]
+            },
+            "description": "Blacklists the refresh token so it can no longer be used.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Forgot password: send code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/password-reset/request/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "password-reset",
+                "request",
+                ""
+              ]
+            },
+            "description": "Emails a 6-digit code (from noreply@riceflow.me). The reply is the same whether or not the email is registered, so it does not reveal who has an account. At most 1 code a minute and 5 a day.\n\nWho: anyone (no token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{farmer_email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Forgot password: set new password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/password-reset/confirm/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "password-reset",
+                "confirm",
+                ""
+              ]
+            },
+            "description": "Sets the new password with the emailed code. A code lasts 10 minutes and 5 wrong tries. Success logs the account out on every device.\n\nWho: anyone (no token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{farmer_email}}\",\n  \"code\": \"123456\",\n  \"new_password\": \"Bagong-Palay-77\",\n  \"new_password2\": \"Bagong-Palay-77\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Farms",
+      "description": "The farmer's farms. The barangay is set by the server from the pin (official NAMRIA/PSA boundaries).",
+      "item": [
+        {
+          "name": "Check a pin before saving",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/check-location/?lat=7.3086&lon=125.6830",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "check-location",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "lon",
+                  "value": "125.6830"
+                }
+              ]
+            },
+            "description": "Is this pin on farmland, and in which Panabo barangay? Flags roads, buildings, water and mangroves.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Create a farm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/farms/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                ""
+              ]
+            },
+            "description": "Saves a farm. `ecosystem` is `irrigated_lowland`, `rainfed_lowland` or `upland`. **Saves the new id into `farm_id`.**\n\nNote: this writes to the live database; use a test account.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Santos Family Farm\",\n  \"latitude\": 7.3086,\n  \"longitude\": 125.683,\n  \"area_hectares\": 2.5,\n  \"ecosystem\": \"irrigated_lowland\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = j.id;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('farm_id', v); console.log('farm_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My farms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                ""
+              ]
+            },
+            "description": "Lists only the signed-in farmer's farms. **Saves the first farm's id into `farm_id`.**\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = list.length ? list[0].id : undefined;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('farm_id', v); console.log('farm_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One farm",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "One of your farms. Another farmer's farm returns 404. The same URL also takes PUT (full edit) and DELETE (remove your farm).\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Edit a farm",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/farms/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "Changes the farm's name, size or water source. Moving the pin updates the barangay.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"area_hectares\": 2.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Environmental scan and weather",
+      "description": "Soil, weather, rainfall, elevation and flood risk for a farm.",
+      "item": [
+        {
+          "name": "Scan a farm",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/environmental/scan/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "environmental",
+                "scan",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "Reads soil (OpenLandMap saved data, SoilGrids as backup, BSWM soil series for texture), weather and rainfall (Open-Meteo) and elevation, in parallel. Saves one scan row and returns it with `soil_sampling`. **Saves the scan id into `scan_id`.** Takes up to about 20 s.\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = j.id;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('scan_id', v); console.log('scan_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Scan history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/environmental/history/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "environmental",
+                "history",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "Every scan of the farm, newest first.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Weather forecast",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/environmental/weather/?lat=7.3086&lng=125.6830",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "environmental",
+                "weather",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "lng",
+                  "value": "125.6830"
+                }
+              ]
+            },
+            "description": "Current weather, the next 8 hours, and `outlook` (rain, wind and heat for the next 6/24/48 hours) used by the planting guide's weather warnings. Cached 10 minutes per ~1 km area (`X-Cache` header).\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Monthly rainfall",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/environmental/monthly-rainfall/?lat=7.3086&lng=125.6830",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "environmental",
+                "monthly-rainfall",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "lng",
+                  "value": "125.6830"
+                }
+              ]
+            },
+            "description": "Average rain per month (Jan-Dec) over the last 3 full years, from the Open-Meteo archive. The planting calendar is built from this.\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Recommendations (RSI + K-Means)",
+      "description": "Rice Suitability Index scoring with weighted rules (WLC) and K-Means cluster labels.",
+      "item": [
+        {
+          "name": "Suitability rules (WLC weights)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/rules/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "rules",
+                ""
+              ]
+            },
+            "description": "The weights and FAO-style S1/S2/S3 ranges for the 12 factors (soil pH, texture, rainfall, temperature, ...). Stored in the database and edited by the admin.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Generate a recommendation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/generate/{{scan_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "generate",
+                "{{scan_id}}",
+                ""
+              ]
+            },
+            "description": "Scores every variety for the scan with the RSI, ranks them and returns the top 3 with `rsi_score`, `suitability_class`, `factor_scores`, `variety_cluster` and a plain-language `fit_explanation`. **Saves the id into `recommendation_id` and the top variety into `variety_id`.**\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = j.id;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('recommendation_id', v); console.log('recommendation_id =', v); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = (j.results && j.results[0] && j.results[0].variety) ? j.results[0].variety.id : undefined;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('variety_id', v); console.log('variety_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recommendation history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/history/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "history",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "Every recommendation for the farm.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Next crop from the last top 3",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/reuse/{{farm_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "reuse",
+                "{{farm_id}}",
+                ""
+              ]
+            },
+            "description": "Starts the next crop from the latest top 3 without a new scan. 409 when a new scan is needed (season changed, scan over 184 days old, or the farm was edited).\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Rice varieties",
+      "description": "The NSIC rice variety catalog and its reference tables.",
+      "item": [
+        {
+          "name": "All varieties",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                ""
+              ]
+            },
+            "description": "The active varieties (17). Staff can add `?all=1` to include inactive ones.\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = list.length ? list[0].id : undefined;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('variety_id', v); console.log('variety_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One variety",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/{{variety_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "{{variety_id}}",
+                ""
+              ]
+            },
+            "description": "One variety: yield, maturity, ecosystem, tolerances. Staff can also PUT/PATCH it; only the admin can DELETE.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Growth stages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/growth-stages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "growth-stages",
+                ""
+              ]
+            },
+            "description": "The 10 rice growth stages.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Fertilizer schedule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/fertilizer-schedule/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "fertilizer-schedule",
+                ""
+              ]
+            },
+            "description": "Fertilizer timing by growth stage.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Pests and diseases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/pests-diseases/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "pests-diseases",
+                ""
+              ]
+            },
+            "description": "Pest and disease reference list. Optional `?type=pest` or `?type=disease`.\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Planting guide (PalayCheck)",
+      "description": "The step-by-step guide from DA-PhilRice booklets (PalayCheck 2022 for irrigated, direct-seeded booklets for rainfed and upland). No AI writes the steps.",
+      "item": [
+        {
+          "name": "Make the planting guide",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guides/generate/{{recommendation_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guides",
+                "generate",
+                "{{recommendation_id}}",
+                ""
+              ]
+            },
+            "description": "Builds the guide for the chosen variety, timed to its maturity. `variety` (optional) must be one of the recommendation's top 3. `language`: `en`, `fil` or `ceb`. **Saves `guide_id` and the first open step into `step_id`.**\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variety\": {{variety_id}},\n  \"language\": \"en\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = j.id;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('guide_id', v); console.log('guide_id =', v); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = (j.steps || []).filter(s => !s.is_completed).map(s => s.id)[0];",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('step_id', v); console.log('step_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My guides",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/guides/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guides",
+                ""
+              ]
+            },
+            "description": "The farmer's planting guides. **Saves the first guide into `guide_id`.**\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = list.length ? list[0].id : undefined;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('guide_id', v); console.log('guide_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One guide",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/guides/{{guide_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guides",
+                "{{guide_id}}",
+                ""
+              ]
+            },
+            "description": "One guide with all its steps. **Saves the first open step into `step_id`.**\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = (j.steps || []).filter(s => !s.is_completed).map(s => s.id)[0];",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('step_id', v); console.log('step_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Did you sow already?",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guides/{{guide_id}}/sowing/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guides",
+                "{{guide_id}}",
+                "sowing",
+                ""
+              ]
+            },
+            "description": "`sown: true` moves sowing to `date` and shifts every open step; `sown: false` moves sowing 3 days later.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sown\": false,\n  \"language\": \"en\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mark a step done",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guides/steps/{{step_id}}/complete/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guides",
+                "steps",
+                "{{step_id}}",
+                "complete",
+                ""
+              ]
+            },
+            "description": "Checks off one guide step (`is_completed`, default true).\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_completed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Crop progress and harvest",
+      "description": "Crop cycles, field logs (steps, problems, notes) and the harvest record.",
+      "item": [
+        {
+          "name": "My crop cycles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/cycles/?farm_id={{farm_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "cycles",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "farm_id",
+                  "value": "{{farm_id}}"
+                }
+              ]
+            },
+            "description": "The farm's crop cycles, each with today's `stage`. **Saves the first cycle into `cycle_id`.**\n\nWho: any signed-in user (farmer token)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = list.length ? list[0].id : undefined;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('cycle_id', v); console.log('cycle_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One crop cycle",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/cycles/{{cycle_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "cycles",
+                "{{cycle_id}}",
+                ""
+              ]
+            },
+            "description": "One cycle: variety, season, planting and harvest dates, status. The same URL also takes PUT, PATCH and DELETE.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Start a crop cycle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/progress/cycles/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "cycles",
+                ""
+              ]
+            },
+            "description": "Normally started by the recommendation and guide. A farm has one active cycle at a time (400 otherwise). `season`: `wet` or `dry`.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"farm\": {{farm_id}},\n  \"variety\": {{variety_id}},\n  \"season\": \"dry\",\n  \"year\": 2026,\n  \"planting_date\": \"2026-11-22\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Field logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/logs/?cycle_id={{cycle_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "logs",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "cycle_id",
+                  "value": "{{cycle_id}}"
+                }
+              ]
+            },
+            "description": "The cycle's field logs, newest first.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Log a problem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/progress/logs/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "logs",
+                ""
+              ]
+            },
+            "description": "Saves a field log. With `problem_key` (from Advice > Problem list) it is a reported problem: it shows on the admin dashboard's \"Problems this week\". `issue_type`: pest, disease, weather, nutrient, other. `severity`: low, medium, high. With `guide_step` it finishes that guide step. **Saves the id into `log_id`.**\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"farm_cycle\": {{cycle_id}},\n  \"log_date\": \"2026-11-13\",\n  \"observation\": \"Saw rat damage near the dike\",\n  \"issue_type\": \"pest\",\n  \"problem_key\": \"rats\",\n  \"severity\": \"low\",\n  \"action_taken\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const list = Array.isArray(j) ? j : (j.results || []);",
+                  "const v = j.id;",
+                  "if (v !== undefined && v !== null) { pm.collectionVariables.set('log_id', v); console.log('log_id =', v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark a problem fixed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/progress/logs/{{log_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "logs",
+                "{{log_id}}",
+                ""
+              ]
+            },
+            "description": "\"Okay na\": the problem card leaves the guide and the admin dashboard. The same URL also takes GET, PUT and DELETE.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolved_at\": \"2026-11-13T08:00:00+08:00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Harvest record",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/cycles/{{cycle_id}}/yield/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "cycles",
+                "{{cycle_id}}",
+                "yield",
+                ""
+              ]
+            },
+            "description": "The cycle's harvest. 404 until the harvest is recorded (that is expected for a growing crop).\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Record the harvest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/progress/cycles/{{cycle_id}}/yield/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "cycles",
+                "{{cycle_id}}",
+                "yield",
+                ""
+              ]
+            },
+            "description": "Saves the harvest, marks the cycle completed, saves the model's prediction beside it for comparison, and every 5th new harvest retrains the yield model. PATCH the same URL to correct it.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"harvest_date\": \"2027-03-08\",\n  \"area_harvested_ha\": 1.5,\n  \"gross_yield_kg\": 7500,\n  \"net_yield_kg\": 6800,\n  \"moisture_pct\": 14.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Yield prediction (Linear Regression)",
+      "description": "Predicts tonnes per hectare from the farm's scan and the variety.",
+      "item": [
+        {
+          "name": "Predict yield",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/predictions/predict/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predictions",
+                "predict",
+                ""
+              ]
+            },
+            "description": "Returns `predicted_yield_t_ha`, the model used and its R². With `farm_id`, the prediction is saved for that farm's crop so it can be compared with the real harvest.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"area_ha\": 2.5,\n  \"soil_ph\": 6.2,\n  \"organic_matter\": 2.5,\n  \"avg_temperature\": 27,\n  \"seasonal_rainfall\": 1800,\n  \"humidity\": 82,\n  \"elevation_m\": 45,\n  \"flood_risk\": \"low\",\n  \"ecosystem\": \"irrigated_lowland\",\n  \"maturity_days\": 115,\n  \"variety_avg_yield\": 6.0,\n  \"season\": \"dry\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Model trainings (R², MAE, RMSE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/predictions/models/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predictions",
+                "models",
+                ""
+              ]
+            },
+            "description": "Every training, newest first, with its scores; `is_active` marks the model in use.\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. AI (Gemini) - uses daily quota",
+      "description": "GeoRice AI. Each call uses the free Gemini quota (shared by all farmers), so send these only once during the demo.",
+      "item": [
+        {
+          "name": "Ask the AI",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ai/chat/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ai",
+                "chat",
+                ""
+              ]
+            },
+            "description": "Answers from the DA-PhilRice booklets (File Search) using the farm's scan, variety, crop day, current guide step and weather. `sources` lists the booklet pages used. 429 at the farmer's daily limit, 503 when Gemini is busy.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"When should I apply the first fertilizer?\",\n  \"history\": [],\n  \"language\": \"en\",\n  \"farm\": {{farm_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Explain a problem for my farm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/advice/explain/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "advice",
+                "explain",
+                ""
+              ]
+            },
+            "description": "The AI explains the problem's booklet cards for this farm. Every point must cite a card; answers naming a chemical or dose are rejected by code.\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"problem\": \"rats\",\n  \"language\": \"en\",\n  \"farm\": {{farm_id}},\n  \"question\": \"What should I do now?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Match the farmer's words to a problem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/advice/match/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "advice",
+                "match",
+                ""
+              ]
+            },
+            "description": "Matches free text (any of the 3 languages) to at most 3 problems from the list. Works without AI too (keywords).\n\nWho: any signed-in user (farmer token).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"naay mga uhay nga puti ug walay sulod\",\n  \"language\": \"ceb\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Problem advice (booklets, no AI)",
+      "description": "Official PhilRice/PalayCheck advice cards, each line with its booklet and page.",
+      "item": [
+        {
+          "name": "Problem list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/advice/problems/?language=en",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "advice",
+                "problems",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "en, fil or ceb"
+                }
+              ]
+            },
+            "description": "The 9 problems plus \"Not sure\", for the picker.\n\nWho: any signed-in user (farmer token)."
+          }
+        },
+        {
+          "name": "Problem card",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/advice/problems/rats/?language=en",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "advice",
+                "problems",
+                "rats",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "en, fil or ceb"
+                }
+              ]
+            },
+            "description": "How to identify it, when it is serious, what to do now, what not to do, next season, and where to get help, each with sources.\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Notices",
+      "description": "Messages to the farmer from admin actions (shown in the app's bell).",
+      "item": [
+        {
+          "name": "My notices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/activity/notices/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "activity",
+                "notices",
+                ""
+              ]
+            },
+            "description": "The farmer's notices from the last 30 days (farm removed, variety updated, ...).\n\nWho: any signed-in user (farmer token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Admin website (read only)",
+      "description": "What the admin website reads. Uses `admin_token` (run Auth > Login (admin) first).",
+      "item": [
+        {
+          "name": "Dashboard numbers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/admin-stats/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "admin-stats",
+                ""
+              ]
+            },
+            "description": "Totals, average yield, varieties, farms by ecosystem and recent activity.\n\nWho: staff only (admin or validator token). A farmer gets 403."
+          }
+        },
+        {
+          "name": "Season board and attention lists",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/admin-season/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "admin-season",
+                ""
+              ]
+            },
+            "description": "Crops per growth stage, not-sown count, and the 4 attention lists: problems, late steps, flagged pins, harvest overdue.\n\nWho: staff only (admin or validator token). A farmer gets 403."
+          }
+        },
+        {
+          "name": "System health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/system-health/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "system-health",
+                ""
+              ]
+            },
+            "description": "Checks the database and every external API the backend uses.\n\nWho: staff only (admin or validator token). A farmer gets 403."
+          }
+        },
+        {
+          "name": "All farms (Farm Map)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/all/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "all",
+                ""
+              ]
+            },
+            "description": "Every farm with owner, latest flood risk and latest yield, for the map.\n\nWho: staff only (admin or validator token). A farmer gets 403."
+          }
+        },
+        {
+          "name": "All crop cycles (Farm Cycles)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/admin/cycles/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "admin",
+                "cycles",
+                ""
+              ]
+            },
+            "description": "Every crop with its stage group (Land Prep, Planting, ...).\n\nWho: staff only (admin or validator token). A farmer gets 403."
+          }
+        },
+        {
+          "name": "All users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/users/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ""
+              ]
+            },
+            "description": "Every account with its role.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Change log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/activity/changes/?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "activity",
+                "changes",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "1 to 500"
+                }
+              ]
+            },
+            "description": "Every change made from the admin website: who, what, old and new values.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "13. Admin - changes live data (locked)",
+      "description": "These change or delete LIVE data. They are locked by a pre-request script: set the collection variable `allow_live_changes` to `yes` to send one. **Do not send these during the defense.**",
+      "item": [
+        {
+          "name": "Edit the suitability rules",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/rules/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "rules",
+                ""
+              ]
+            },
+            "description": "Saves new WLC weights and ranges (logged in the change log).\n\nWho: admin only. A validator or farmer gets 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payload\": {\n    \"rules\": \"(the full rules list from GET rules)\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/users/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ""
+              ]
+            },
+            "description": "Creates an account. `role`: farmer, admin or superadmin.\n\nWho: admin only. A validator or farmer gets 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"validator1\",\n  \"email\": \"validator1@example.com\",\n  \"password\": \"Change-Me-123\",\n  \"role\": \"admin\",\n  \"first_name\": \"Ana\",\n  \"last_name\": \"Reyes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Turn a user off or on",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/users/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ""
+              ]
+            },
+            "description": "Deactivates or reactivates an account by `id`.\n\nWho: admin only. A validator or farmer gets 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 0,\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete a user",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/users/{{target_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                "{{target_id}}",
+                ""
+              ]
+            },
+            "description": "Deletes an account. The same URL also takes GET (one user) and PATCH (edit name, email, role or password).\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Add a variety",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                ""
+              ]
+            },
+            "description": "Adds a variety to the catalog.\n\nWho: admin only. A validator or farmer gets 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variety_id\": \"RC000\",\n  \"nsic_code\": \"NSIC Rc000\",\n  \"common_name\": \"Example\",\n  \"ecosystem\": \"irrigated_lowland\",\n  \"avg_yield_t_ha\": 5.5,\n  \"maturity_days\": 110\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Edit a variety",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/{{target_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "{{target_id}}",
+                ""
+              ]
+            },
+            "description": "Corrects a variety (validators can do this too).\n\nWho: staff only (admin or validator token). A farmer gets 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avg_yield_t_ha\": 5.6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Import varieties from CSV",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/varieties/import-csv/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "varieties",
+                "import-csv",
+                ""
+              ]
+            },
+            "description": "Uploads a CSV of varieties (form field `file`).\n\nWho: admin only. A validator or farmer gets 403.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete a farm",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/admin/{{target_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "admin",
+                "{{target_id}}",
+                ""
+              ]
+            },
+            "description": "Deletes a farm; the farmer gets a notice.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Delete a crop cycle",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/progress/admin/cycles/{{target_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "progress",
+                "admin",
+                "cycles",
+                "{{target_id}}",
+                ""
+              ]
+            },
+            "description": "Deletes a crop cycle; the farmer gets a notice.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Delete duplicate farms (all users)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/farms/cleanup/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "farms",
+                "cleanup",
+                ""
+              ]
+            },
+            "description": "Keeps only each user's newest farm and deletes the rest.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Retrain the yield model",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/predictions/train/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predictions",
+                "train",
+                ""
+              ]
+            },
+            "description": "Trains Linear Regression on all data; the new model is used from then on.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Retrain the K-Means models",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/train/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "train",
+                ""
+              ]
+            },
+            "description": "Retrains the clustering models.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        },
+        {
+          "name": "Set the active clustering model",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations/set-model/kmeans/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recommendations",
+                "set-model",
+                "kmeans",
+                ""
+              ]
+            },
+            "description": "Makes a trained clustering model the active one.\n\nWho: admin only. A validator or farmer gets 403."
+          }
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Safety lock: these requests change or delete LIVE data on api.riceflow.me.",
+              "// To send one on purpose, set the collection variable allow_live_changes to: yes",
+              "if (pm.collectionVariables.get('allow_live_changes') !== 'yes') {",
+              "  throw new Error('Locked: this request changes live data. Set allow_live_changes to yes to send it.');",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. External APIs the backend calls",
+      "description": "Free public APIs, no key. The backend calls these; you can also open them in a browser.",
+      "item": [
+        {
+          "name": "Open-Meteo forecast",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Weather and forecast (apps/environmental/services/openmeteo.py).",
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/forecast?latitude=7.3086&longitude=125.6830&current=temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_days=3&timezone=Asia/Manila",
+              "protocol": "https",
+              "host": [
+                "api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "forecast"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.6830"
+                },
+                {
+                  "key": "current",
+                  "value": "temperature_2m,weather_code,precipitation,relative_humidity_2m,wind_speed_10m"
+                },
+                {
+                  "key": "hourly",
+                  "value": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m"
+                },
+                {
+                  "key": "forecast_days",
+                  "value": "3"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Open-Meteo rainfall archive",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Past daily rain, used for seasonal and monthly rainfall.",
+            "url": {
+              "raw": "https://archive-api.open-meteo.com/v1/archive?latitude=7.3086&longitude=125.6830&start_date=2025-01-01&end_date=2025-12-31&daily=precipitation_sum&timezone=Asia/Manila",
+              "protocol": "https",
+              "host": [
+                "archive-api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "archive"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.6830"
+                },
+                {
+                  "key": "start_date",
+                  "value": "2025-01-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-12-31"
+                },
+                {
+                  "key": "daily",
+                  "value": "precipitation_sum"
+                },
+                {
+                  "key": "timezone",
+                  "value": "Asia/Manila"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Open-Meteo elevation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Elevation in metres at the pin.",
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/elevation?latitude=7.3086&longitude=125.6830",
+              "protocol": "https",
+              "host": [
+                "api",
+                "open-meteo",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "elevation"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "longitude",
+                  "value": "125.6830"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "SoilGrids soil properties",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Backup soil source when the saved OpenLandMap data does not cover the point (apps/environmental/services/soilgrids.py). Can be slow.",
+            "url": {
+              "raw": "https://rest.isric.org/soilgrids/v2.0/properties/query?lon=125.6830&lat=7.3086&property=phh2o&property=clay&property=soc&depth=0-5cm&value=mean",
+              "protocol": "https",
+              "host": [
+                "rest",
+                "isric",
+                "org"
+              ],
+              "path": [
+                "soilgrids",
+                "v2.0",
+                "properties",
+                "query"
+              ],
+              "query": [
+                {
+                  "key": "lon",
+                  "value": "125.6830"
+                },
+                {
+                  "key": "lat",
+                  "value": "7.3086"
+                },
+                {
+                  "key": "property",
+                  "value": "phh2o"
+                },
+                {
+                  "key": "property",
+                  "value": "clay"
+                },
+                {
+                  "key": "property",
+                  "value": "soc"
+                },
+                {
+                  "key": "depth",
+                  "value": "0-5cm"
+                },
+                {
+                  "key": "value",
+                  "value": "mean"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
